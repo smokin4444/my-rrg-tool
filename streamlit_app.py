@@ -9,35 +9,15 @@ st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
 # --- 1. THE STAPLE LISTS (LOCKED) ---
 MASTER_THEMES = "SOXX, IGV, XLP, MAGS, URA, COPX, GDXJ, SILJ, IBIT, ITA, POWR, XME, XLC, XLY, XLE, XLF, XLV, XLI, XLB, XLRE, XLK, XLU"
-
-STARTUP_THEMES = (
-    "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, "
-    "PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, "
-    "SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, "
-    "RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, "
-    "UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
-)
-
+STARTUP_THEMES = "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
 RETAIL_SEMIS = "NVDA, AMD, SMCI, AVGO, ARM, MU, TSM, ASML, KLAC, LRCX, MRVL, MSTR, ALAB, ASTS, APLD, WOLF, AEHR, SOUN, GCT, VRT"
-
 MINERS = "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB, MU, APLD"
-
-# Name Mapping
-FUND_MAP = {
-    "SOXX": "Semiconductors", "IBIT": "Spot Bitcoin", "COPX": "Copper", "URA": "Uranium", "ASTS": "AST SpaceMobile"
-}
 
 # --- Sidebar ---
 with st.sidebar:
     st.header("🎯 Watchlist")
     heap_type = st.radio("Choose Group:", ["Master Themes", "Startup", "Retail Semis", "My Miners", "Custom"])
-    
-    if heap_type == "Master Themes": current_list = MASTER_THEMES
-    elif heap_type == "Startup": current_list = STARTUP_THEMES
-    elif heap_type == "Retail Semis": current_list = RETAIL_SEMIS
-    elif heap_type == "My Miners": current_list = MINERS
-    else: current_list = st.session_state.get('custom_list', MASTER_THEMES)
-
+    current_list = MASTER_THEMES if heap_type == "Master Themes" else STARTUP_THEMES if heap_type == "Startup" else RETAIL_SEMIS if heap_type == "Retail Semis" else MINERS if heap_type == "My Miners" else st.session_state.get('custom_list', MASTER_THEMES)
     tickers_input = st.text_area("Ticker Heap:", value=current_list, height=200).replace("HG1!", "HG=F")
     benchmark = st.text_input("Benchmark:", value="SPY")
     st.markdown("---")
@@ -53,10 +33,7 @@ def get_quadrant(ratio, mom):
     return "WEAKENING"
 
 def get_sync_status(d_q, w_q, d_ratio):
-    # PRIORITY 1: POWER WALK (The Elite Rest)
-    if d_ratio > 101.5 and d_q == "WEAKENING": 
-        return "POWER WALK"
-    # PRIORITY 2: THE SYNCS
+    if d_ratio > 101.5 and d_q == "WEAKENING": return "POWER WALK"
     if d_q == "LEADING" and w_q == "LEADING": return "BULLISH SYNC"
     if d_q == "LEADING" and w_q == "IMPROVING": return "EARLY ACCEL"
     if d_q == "IMPROVING" and w_q == "LAGGING": return "DAILY PIVOT"
@@ -65,12 +42,11 @@ def get_sync_status(d_q, w_q, d_ratio):
 @st.cache_data(ttl=3600)
 def get_full_analysis(ticker_str, bench):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
-    all_list = list(set(tickers + [bench.upper(), "^VIX"]))
+    all_list = list(set(tickers + [bench.upper()]))
     data = yf.download(all_list, period="2y", interval="1d", group_by='ticker', progress=False)
     w_data = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
     
     history, table_data = {"Daily": {}, "Weekly": {}}, []
-
     for t in tickers:
         try:
             if t not in data.columns.get_level_values(0): continue
@@ -92,11 +68,7 @@ def get_full_analysis(ticker_str, bench):
                 history["Weekly"][t] = pd.DataFrame({'x': w_res[0], 'y': w_res[1]}).dropna()
                 d_q, w_q = get_quadrant(d_res[0].iloc[-1], d_res[1].iloc[-1]), get_quadrant(w_res[0].iloc[-1], w_res[1].iloc[-1])
                 status = get_sync_status(d_q, w_q, d_res[0].iloc[-1])
-                table_data.append({
-                    "Ticker": t, "Name": FUND_MAP.get(t, ""), "Sync Status": status,
-                    "Daily Quad": d_q, "Weekly Quad": w_q, "Daily CH": d_res[2], "Weekly CH": w_res[2],
-                    "RS-Ratio": round(d_res[0].iloc[-1], 2), "Rel Vol": d_res[3]
-                })
+                table_data.append({"Ticker": t, "Sync Status": status, "Daily Quad": d_q, "Weekly Quad": w_q, "Daily CH": d_res[2], "Weekly CH": w_res[2], "RS-Ratio": round(d_res[0].iloc[-1], 2), "Rel Vol": d_res[3]})
         except: continue
     return pd.DataFrame(table_data), history
 
@@ -104,9 +76,20 @@ def get_full_analysis(ticker_str, bench):
 try:
     df_main, history_data = get_full_analysis(tickers_input, benchmark)
 
-    # 1. RRG CHART
-    st.subheader(f"🌀 {timeframe} Rotation")
+    # 1. RRG CHART with Light Green Power Zone
+    st.subheader(f"🌀 {timeframe} Rotation (Light Green = Elite Power Zone)")
     fig = go.Figure()
+
+    # LIGHT GREEN SHADING
+    fig.add_vrect(
+        x0=101.5, x1=105, 
+        fillcolor="rgba(46, 204, 113, 0.15)", # Light Green (Emerald) with transparency
+        layer="below", 
+        line_width=0, 
+        annotation_text="POWER ZONE", 
+        annotation_position="top right"
+    )
+    
     fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="gray", width=1, dash="dash"))
     fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="gray", width=1, dash="dash"))
     
@@ -114,10 +97,10 @@ try:
         if filter_setups and t not in df_main[df_main['Sync Status'] != "DIVERGED"]['Ticker'].values: continue
         color = px.colors.qualitative.Plotly[i % 10]
         df_p = df.tail(tail_len)
-        fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines+markers', name=t, line=dict(color=color), marker=dict(size=4), legendgroup=t))
-        fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=12, color=color, line=dict(width=1, color='white')), text=[t], textposition="top center", showlegend=False, legendgroup=t))
+        fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines+markers', name=t, line=dict(color=color, width=2), marker=dict(size=4), legendgroup=t))
+        fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=13, color=color, line=dict(width=1, color='white')), text=[t], textposition="top center", showlegend=False, legendgroup=t))
 
-    fig.update_layout(template="plotly_white", height=700, xaxis=dict(range=[97, 103], title="RS-Ratio"), yaxis=dict(range=[97, 103], title="RS-Momentum"))
+    fig.update_layout(template="plotly_white", height=750, xaxis=dict(range=[97, 103], title="Relative Strength (RS-Ratio)"), yaxis=dict(range=[97, 103], title="Momentum (RS-Momentum)"))
     st.plotly_chart(fig, use_container_width=True)
 
     # 2. GRID
