@@ -3,122 +3,98 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
+from scipy.interpolate import interp1d
 
-# Set up the page
-st.set_page_config(page_title="High-Beta RRG Dashboard", layout="wide")
+st.set_page_config(page_title="Pro-RRG Dashboard", layout="wide")
 
-st.title("🚀 Relative Rotation Graph (RRG)")
-st.write("Compare your juniors and high-beta names against any benchmark.")
+st.title("📈 Professional Relative Rotation Graph")
 
-# --- Sidebar Controls ---
+# --- Sidebar ---
 with st.sidebar:
-    st.header("1. Settings")
-    # Your "Heap" of tickers - You can add as many as you want here
-    user_tickers = st.text_area("Enter Tickers (comma separated):", 
-                                "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB, ERO.TO, HBM")
-    
-    # Benchmark - This is what you compare them against (e.g., COPX or SPY)
-    benchmark = st.text_input("Benchmark Ticker:", "COPX")
-    
-    # Timeframe Toggle
+    st.header("Settings")
+    user_tickers = st.text_area("Tickers:", "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB")
+    benchmark = st.text_input("Benchmark:", "COPX")
     timeframe = st.radio("Timeframe:", ["Daily", "Weekly"])
-    
-    # History (Length of the tail)
-    tail_length = st.slider("Tail Length (Periods):", 5, 20, 10)
+    tail_length = st.slider("Tail Length:", 5, 30, 15)
 
-# --- The RRG Math Engine ---
-def calculate_rrg(ticker_list, bench, tf, tail):
-    # Set interval based on toggle
+# --- Math & Smoothing Engine ---
+def get_rrg_data(ticker_list, bench, tf, tail):
     interval = "1d" if tf == "Daily" else "1wk"
-    period = "2y" # We need enough data for the 14-period average
-    
-    # Clean the ticker list
     tickers = [t.strip() for t in ticker_list.split(",") if t.strip()]
-    all_list = list(set(tickers + [bench])) # Remove duplicates
+    all_list = list(set(tickers + [bench]))
     
-    # Download data
-    data_raw = yf.download(all_list, period=period, interval=interval)
-    
-    # --- CRITICAL FIX: Flatten the Multi-Index Table ---
-    # When yfinance downloads multiple tickers, it creates a "Double Header"
-    # We only want the 'Close' prices
-    if isinstance(data_raw.columns, pd.MultiIndex):
-        data = data_raw['Close']
-    else:
-        # If it's a single ticker, it might not be a MultiIndex
-        data = data_raw[['Close']]
-        data.columns = all_list # Rename to the ticker name
-        
+    data_raw = yf.download(all_list, period="2y", interval=interval)
+    data = data_raw['Close'] if isinstance(data_raw.columns, pd.MultiIndex) else data_raw[['Close']]
     data = data.dropna()
     
-    rrg_results = []
-    
-    # Safety Check: Ensure the benchmark exists in the data
-    if bench not in data.columns:
-        st.error(f"Error: Benchmark '{bench}' not found in data. Check the ticker name.")
-        return pd.DataFrame()
-
+    rrg_results = {}
     bench_price = data[bench]
     
     for t in tickers:
-        if t not in data.columns or t == bench:
-            continue
+        if t not in data.columns or t == bench: continue
         
-        # 1. Price Relative (Stock / Benchmark)
+        # Calculate RS-Ratio and RS-Momentum
         rel_price = (data[t] / bench_price) * 100
-        
-        # 2. RS-Ratio (Moving Average & Standard Deviation)
-        # Traditionally uses a 14-period smoothing
         sma = rel_price.rolling(14).mean()
         std = rel_price.rolling(14).std()
         rs_ratio = 100 + ((rel_price - sma) / std)
         
-        # 3. RS-Momentum (Rate of Change of the Ratio)
         roc = rs_ratio.pct_change(1) * 100
         roc_sma = roc.rolling(14).mean()
         roc_std = roc.rolling(14).std()
         rs_momentum = 100 + ((roc - roc_sma) / roc_std)
         
-        # Create a tiny table for just this stock's "tail"
-        df = pd.DataFrame({'Ratio': rs_ratio, 'Momentum': rs_momentum}).tail(tail)
-        df['Ticker'] = t
-        rrg_results.append(df)
+        # Get raw tail points
+        raw_tail = pd.DataFrame({'x': rs_ratio, 'y': rs_momentum}).dropna().tail(tail)
         
-    if not rrg_results:
-        return pd.DataFrame()
-        
-    return pd.concat(rrg_results)
+        if len(raw_tail) < 3: continue
 
-# --- Generate and Display ---
+        # --- SMOOTHING (Cubic Spline) ---
+        # We create 5x more points between the raw data to make it curve
+        t_raw = np.arange(len(raw_tail))
+        t_smooth = np.linspace(0, len(raw_tail)-1, len(raw_tail)*5)
+        
+        fx = interp1d(t_raw, raw_tail['x'], kind='cubic')
+        fy = interp1d(t_raw, raw_tail['y'], kind='cubic')
+        
+        rrg_results[t] = pd.DataFrame({'x': fx(t_smooth), 'y': fy(t_smooth)})
+
+    return rrg_results
+
+# --- Plotting ---
 try:
-    with st.spinner('Calculating Rotation...'):
-        plot_df = calculate_rrg(user_tickers, benchmark, timeframe, tail_length)
+    results = get_rrg_data(user_tickers, benchmark, timeframe, tail_length)
     
-    if not plot_df.empty:
-        # Create the Plotly Scatter Plot
-        fig = px.scatter(plot_df, x="Ratio", y="Momentum", color="Ticker",
-                         text="Ticker", template="plotly_dark", height=700)
-        
-        # Add Quadrant Lines (The crosshair at 100, 100)
-        fig.add_hline(y=100, line_dash="dash", line_color="white")
-        fig.add_vline(x=100, line_dash="dash", line_color="white")
-        
-        # Add the "Tails" (The lines showing where the stock came from)
-        for ticker in plot_df['Ticker'].unique():
-            t_data = plot_df[plot_df['Ticker'] == ticker]
-            fig.add_scatter(x=t_data['Ratio'], y=t_data['Momentum'], 
-                            mode='lines', line=dict(width=2), showlegend=False)
+    fig = go.Figure()
 
-        # Labels for the quadrants
-        fig.add_annotation(x=102, y=102, text="LEADING", showarrow=False, font=dict(color="green"))
-        fig.add_annotation(x=98, y=102, text="IMPROVING", showarrow=False, font=dict(color="blue"))
-        fig.add_annotation(x=98, y=98, text="LAGGING", showarrow=False, font=dict(color="red"))
-        fig.add_annotation(x=102, y=98, text="WEAKENING", showarrow=False, font=dict(color="yellow"))
+    # 1. Add Quadrant Lines (The Crosshair)
+    fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="black", width=2))
+    fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="black", width=2))
 
-        st.plotly_chart(fig, use_container_width=True)
-        st.success(f"Successfully comparing {len(plot_df['Ticker'].unique())} tickers vs {benchmark}")
-    else:
-        st.warning("No data found for these tickers. Check your spelling (e.g., AFM.V or A4N.AX).")
+    # 2. Add Quadrant Labels with high-contrast colors
+    fig.add_annotation(x=102, y=102, text="LEADING", showarrow=False, font=dict(color="green", size=16))
+    fig.add_annotation(x=98, y=102, text="IMPROVING", showarrow=False, font=dict(color="blue", size=16))
+    fig.add_annotation(x=98, y=98, text="LAGGING", showarrow=False, font=dict(color="red", size=16))
+    fig.add_annotation(x=102, y=98, text="WEAKENING", showarrow=False, font=dict(color="#FF8C00", size=16)) # Dark Orange
+
+    # 3. Add smoothed tails and arrowheads
+    for ticker, df in results.items():
+        # Draw the smooth line
+        fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='lines', 
+                                 name=ticker, line=dict(width=3), hoverinfo='skip'))
+        
+        # Add a marker at the current (last) point with an ARROW symbol
+        fig.add_trace(go.Scatter(x=[df['x'].iloc[-1]], y=[df['y'].iloc[-1]],
+                                 mode='markers+text',
+                                 marker=dict(size=12, symbol="arrow-bar-up", angleref="previous"),
+                                 text=[ticker], textposition="top right",
+                                 name=ticker, showlegend=True))
+
+    fig.update_layout(template="plotly_white", xaxis_title="RS-Ratio", yaxis_title="RS-Momentum",
+                      xaxis=dict(range=[95, 105]), yaxis=dict(range=[95, 105]))
+
+    st.plotly_chart(fig, use_container_width=True)
 
 except Exception as e:
-    st.error(f"Something went wrong: {e}")
+    st.error(f"Error: {e}. Check your tickers and benchmark.")
