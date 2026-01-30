@@ -8,7 +8,7 @@ from scipy.interpolate import interp1d
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
-# --- Master Ticker Heap ---
+# --- MASTER TICKER HEAP ---
 MY_MINERS = "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB"
 THEMATIC_HEAPS = "SOXX, IGV, XLP, MAGS, URA, COPX, GDXJ, SILJ, IBIT, ITA, POWR, XME, " \
                  "XLC, XLY, XLE, XLF, XLV, XLI, XLB, XLRE, XLK, XLU"
@@ -48,7 +48,6 @@ def get_rrg_data(ticker_list, bench, tf, tail):
     perf_scores = {}
     valid_tickers = [t for t in tickers if t in data.columns]
     
-    # RS Rating logic
     for t in valid_tickers:
         px_curr = data[t].iloc[-1]
         px_3m = data[t].iloc[-63] if len(data) > 63 else data[t].iloc[0]
@@ -76,12 +75,16 @@ def get_rrg_data(ticker_list, bench, tf, tail):
         rt = pd.DataFrame({'x': rs_ratio, 'y': rs_mom}).dropna().tail(tail)
         if len(rt) >= 3:
             tr = np.arange(len(rt)); ts = np.linspace(0, len(rt)-1, len(rt)*5)
-            rrg_dict[t] = pd.DataFrame({'x': interp1d(tr, rt['x'], kind='cubic')(ts), 'y': interp1d(tr, rt['y'], kind='cubic')(ts)})
+            rrg_results[t] = pd.DataFrame({'x': interp1d(tr, rt['x'], kind='cubic')(ts), 'y': interp1d(tr, rt['y'], kind='cubic')(ts)})
             
     return rrg_results, table_data, data
 
 # --- Execution ---
 try:
+    # Initialize variables to prevent "not defined" errors
+    results = {}
+    table_list = []
+    
     results, table_list, full_data = get_rrg_data(tickers_input, benchmark, timeframe, tail_len)
     
     # VIX REGIME ALERT
@@ -92,24 +95,21 @@ try:
     fig = go.Figure()
     fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="black", width=2))
     fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="black", width=2))
+    
     for i, (t, df) in enumerate(results.items()):
         color = px.colors.qualitative.Plotly[i % 10]
         fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='lines', name=t, line=dict(width=1.5, color=color), legendgroup=t))
         fig.add_trace(go.Scatter(x=[df['x'].iloc[-1]], y=[df['y'].iloc[-1]], mode='markers', 
                                  marker=dict(symbol='arrow', size=18, color=color, angleref='previous'), 
                                  legendgroup=t, showlegend=False, hoverinfo='skip'))
+    
     fig.update_layout(template="plotly_white", height=850, xaxis=dict(range=[96, 104]), yaxis=dict(range=[96, 104]), legend=dict(orientation="h", y=1.05))
     st.plotly_chart(fig, use_container_width=True)
 
-    # SCANNER - Bold CH Score Column
+    # SCANNER
     st.subheader("📊 The Alpha Scanner")
     df_table = pd.DataFrame(table_list).sort_values(by="CH Score", ascending=False)
-    
-    # Styling function for Bold CH Score
-    def bold_ch(val):
-        return 'font-weight: bold; color: #1E88E5' # Blue bold text
-
-    st.dataframe(df_table.style.map(bold_ch, subset=['CH Score']), use_container_width=True)
+    st.dataframe(df_table.style.map(lambda x: 'font-weight: bold; color: #1E88E5', subset=['CH Score']), use_container_width=True)
 
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"Dashboard Initialization Error: {e}")
