@@ -5,13 +5,11 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from scipy.interpolate import interp1d
-from datetime import datetime
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
 # --- CONSOLIDATED TICKER GROUPS ---
 MINERS = "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB"
-# Merged Thematic and Sectors into one master list
 MARKET_GROUPS = (
     "URA, COPX, GDXJ, SILJ, IBIT, ITA, POWR, XME, SOXX, IGV, MAGS, "
     "XLC, XLY, XLP, XLE, XLF, XLV, XLI, XLB, XLRE, XLK, XLU"
@@ -29,7 +27,6 @@ FUND_MAP = {
 # --- Sidebar ---
 with st.sidebar:
     st.header("🎯 Watchlist Selection")
-    # Consolidated radio buttons
     heap_type = st.radio("Choose Group:", ["My Miners", "Market Themes & Sectors", "Custom"])
     
     if heap_type == "My Miners": current_list = MINERS
@@ -43,7 +40,7 @@ with st.sidebar:
     st.header("🕰️ Time Controls")
     timeframe = st.radio("Chart Timeframe:", ["Daily", "Weekly"], index=0)
     tail_len = st.slider("Tail Length (Dots):", 5, 30, 15)
-    filter_setups = st.checkbox("Show Only Top Setups", value=False)
+    filter_setups = st.checkbox("Show Only Top Setups (Sync/Accel/Pivot)", value=False)
 
 # --- Math Engine ---
 def get_quadrant(ratio, mom):
@@ -51,6 +48,13 @@ def get_quadrant(ratio, mom):
     if ratio < 100 and mom >= 100: return "IMPROVING"
     if ratio < 100 and mom < 100: return "LAGGING"
     return "WEAKENING"
+
+def get_sync_status(d_q, w_q):
+    if d_q == "LEADING" and w_q == "LEADING": return "BULLISH SYNC"
+    if d_q == "LEADING" and w_q == "IMPROVING": return "EARLY ACCEL" # <--- Your new setup
+    if d_q == "IMPROVING" and w_q == "LAGGING": return "DAILY PIVOT"
+    if d_q == "LAGGING" and w_q == "LAGGING": return "BEARISH SYNC"
+    return "DIVERGED"
 
 @st.cache_data(ttl=3600)
 def get_full_analysis(ticker_str, bench):
@@ -75,7 +79,6 @@ def get_full_analysis(ticker_str, bench):
             ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
             roc = ratio.pct_change(1) * 100
             mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
-            
             v = np.sqrt((ratio.iloc[-1] - ratio.iloc[-5])**2 + (mom.iloc[-1] - mom.iloc[-5])**2)
             rv = (df['Volume'][t].iloc[-1] / df['Volume'][t].tail(20).mean())
             return ratio, mom, round((v * 0.7) + (rv * 0.3), 2), rv
@@ -86,15 +89,14 @@ def get_full_analysis(ticker_str, bench):
         history["Daily"][t] = pd.DataFrame({'x': d_rat, 'y': d_mom}).dropna()
         history["Weekly"][t] = pd.DataFrame({'x': w_rat, 'y': w_mom}).dropna()
         
-        d_q = get_quadrant(d_rat.iloc[-1], d_mom.iloc[-1])
-        w_q = get_quadrant(w_rat.iloc[-1], w_mom.iloc[-1])
-        status = "BULLISH SYNC" if d_q == "LEADING" and w_q == "LEADING" else \
-                 "DAILY PIVOT" if d_q == "IMPROVING" and w_q == "LAGGING" else \
-                 "BEARISH SYNC" if d_q == "LAGGING" and w_q == "LAGGING" else "DIVERGED"
+        status = get_sync_status(get_quadrant(d_rat.iloc[-1], d_mom.iloc[-1]), 
+                                 get_quadrant(w_rat.iloc[-1], w_mom.iloc[-1]))
         
         table_data.append({
             "Ticker": t, "Name": FUND_MAP.get(t, "Stock"), "Sync Status": status,
-            "Daily Quad": d_q, "Weekly Quad": w_q, "Daily CH": d_ch, "Weekly CH": w_ch, "Rel Vol": d_rv
+            "Daily Quad": get_quadrant(d_rat.iloc[-1], d_mom.iloc[-1]), 
+            "Weekly Quad": get_quadrant(w_rat.iloc[-1], w_mom.iloc[-1]),
+            "Daily CH": d_ch, "Weekly CH": w_ch, "Rel Vol": d_rv
         })
 
     return pd.DataFrame(table_data), history, vix
@@ -105,36 +107,20 @@ try:
     
     st.info(f"🛡️ **VIX:** {vix_val:.2f} | **Target Benchmark:** {benchmark.upper()}")
 
-    # 1. RRG CHART (With Dots & Diamonds)
+    # 1. RRG CHART
     st.subheader(f"🌀 {timeframe} Rotation (Diamonds & Period Dots)")
     fig = go.Figure()
     fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.2)", width=2))
     fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.2)", width=2))
     
     for i, (t, df) in enumerate(history_data[timeframe].items()):
-        if filter_setups and t not in df_main[df_main['Sync Status'].isin(["BULLISH SYNC", "DAILY PIVOT"])]['Ticker'].values:
+        if filter_setups and t not in df_main[df_main['Sync Status'].isin(["BULLISH SYNC", "EARLY ACCEL", "DAILY PIVOT"])]['Ticker'].values:
             continue
             
         color = px.colors.qualitative.Plotly[i % 10]
         df_plot = df.tail(tail_len)
-        
-        # Line + Dots
-        fig.add_trace(go.Scatter(
-            x=df_plot['x'], y=df_plot['y'], 
-            mode='lines+markers', name=t,
-            line=dict(width=2.5, color=color),
-            marker=dict(size=6, color=color, opacity=0.6, line=dict(width=1, color='white')),
-            opacity=0.4, legendgroup=t
-        ))
-        
-        # Diamond Head
-        fig.add_trace(go.Scatter(
-            x=[df_plot['x'].iloc[-1]], y=[df_plot['y'].iloc[-1]],
-            mode='markers+text',
-            marker=dict(symbol='diamond', size=14, color=color, line=dict(width=2, color='white')),
-            text=[t], textposition="top center",
-            legendgroup=t, showlegend=False
-        ))
+        fig.add_trace(go.Scatter(x=df_plot['x'], y=df_plot['y'], mode='lines+markers', name=t, line=dict(width=2.5, color=color), marker=dict(size=6, color=color, opacity=0.6, line=dict(width=1, color='white')), opacity=0.4, legendgroup=t))
+        fig.add_trace(go.Scatter(x=[df_plot['x'].iloc[-1]], y=[df_plot['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=2, color='white')), text=[t], textposition="top center", legendgroup=t, showlegend=False))
 
     fig.update_layout(template="plotly_white", height=750, xaxis=dict(range=[97, 103]), yaxis=dict(range=[97, 103]), legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig, use_container_width=True)
@@ -142,15 +128,18 @@ try:
     # 2. ALIGNMENT GRID
     st.subheader("📊 Dual-Timeframe Alpha Grid")
     
-    # Custom Sort: Bullish Sync first, then Daily Pivot
-    df_main['sort_val'] = df_main['Sync Status'].map({"BULLISH SYNC": 0, "DAILY PIVOT": 1, "DIVERGED": 2, "BEARISH SYNC": 3})
+    df_main['sort_val'] = df_main['Sync Status'].map({"BULLISH SYNC": 0, "EARLY ACCEL": 1, "DAILY PIVOT": 2, "DIVERGED": 3, "BEARISH SYNC": 4})
     df_display = df_main.sort_values(by=['sort_val', 'Daily CH'], ascending=[True, False])
     
     if filter_setups:
-        df_display = df_display[df_display['Sync Status'].isin(["BULLISH SYNC", "DAILY PIVOT"])]
+        df_display = df_display[df_display['Sync Status'].isin(["BULLISH SYNC", "EARLY ACCEL", "DAILY PIVOT"])]
+
+    def style_sync(val):
+        colors = {"BULLISH SYNC": "#2ECC71", "EARLY ACCEL": "#3498DB", "DAILY PIVOT": "#F1C40F", "BEARISH SYNC": "#E74C3C"}
+        return f'background-color: {colors.get(val, "#FBFCFC")}; color: black; font-weight: bold'
 
     st.dataframe(
-        df_display.drop(columns=['sort_val']).style.map(lambda x: f'background-color: {"#2ECC71" if "BULLISH" in x else "#F1C40F" if "PIVOT" in x else "#E74C3C" if "BEARISH" in x else "#FBFCFC"}; color: black; font-weight: bold', subset=['Sync Status'])
+        df_display.drop(columns=['sort_val']).style.map(style_sync, subset=['Sync Status'])
         .map(lambda x: 'font-weight: bold; color: #1E88E5', subset=['Daily CH', 'Weekly CH'])
         .map(lambda x: 'color: #D32F2F; font-weight: bold; background-color: #FFF9C4' if x > 2.5 else '', subset=['Rel Vol'])
         .format({"Rel Vol": "{:.2f}x"}), use_container_width=True
