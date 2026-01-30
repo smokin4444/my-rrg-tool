@@ -6,97 +6,122 @@ import plotly.express as px
 import plotly.graph_objects as go
 from scipy.interpolate import interp1d
 
-st.set_page_config(page_title="Pro-RRG Dashboard", layout="wide")
+st.set_page_config(page_title="RRG & RS Line Dashboard", layout="wide")
 
-st.title("📈 Professional Relative Rotation Graph")
+st.title("📈 Advanced Rotation & Relative Strength")
+
+# --- Persistent Ticker Management ---
+# Your preferred miners are set as the default "Heap"
+MY_MINERS = "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB"
+SECTOR_ETFS = "XLC, XLY, XLP, XLE, XLF, XLV, XLI, XLB, XLRE, XLK, XLU"
+
+FUND_MAP = {
+    "XLC": "Comm. Services", "XLY": "Cons. Discretionary", "XLP": "Cons. Staples",
+    "XLE": "Energy", "XLF": "Financials", "XLV": "Health Care",
+    "XLI": "Industrials", "XLB": "Materials", "XLRE": "Real Estate",
+    "XLK": "Technology", "XLU": "Utilities", "XBI": "Biotech",
+    "XME": "Metals & Mining", "XSD": "Semiconductors", "XOP": "Oil & Gas Exploration",
+    "GDXJ": "Junior Gold Miners", "COPX": "Copper Miners", "REMX": "Strategic Metals"
+}
 
 # --- Sidebar ---
 with st.sidebar:
-    st.header("Settings")
-    user_tickers = st.text_area("Tickers:", "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB")
-    # UPDATED: Default benchmark set to SPY
-    benchmark = st.text_input("Benchmark:", "SPY")
-    timeframe = st.radio("Timeframe:", ["Daily", "Weekly"])
-    tail_length = st.slider("Tail Length:", 5, 30, 15)
+    st.header("1. Controls")
+    # Toggle between your Miners and the Broad Sectors
+    heap_type = st.radio("Choose Watchlist:", ["My Miners", "Sector ETFs", "Custom List"])
+    
+    if heap_type == "My Miners":
+        current_list = MY_MINERS
+    elif heap_type == "Sector ETFs":
+        current_list = SECTOR_ETFS
+    else:
+        current_list = st.session_state.get('custom_list', MY_MINERS)
 
-# --- Math & Smoothing Engine ---
-def get_rrg_data(ticker_list, bench, tf, tail):
+    tickers_input = st.text_area("Ticker Heap:", value=current_list)
+    benchmark = st.text_input("Benchmark:", value="SPY")
+    timeframe = st.radio("Timeframe:", ["Daily", "Weekly"], index=1)
+    tail_len = st.slider("Tail Length:", 5, 30, 15)
+    
+    st.markdown("---")
+    show_all = st.checkbox("Show All on Chart", value=True)
+
+# --- Calculations ---
+@st.cache_data(ttl=3600) # Cache for 1 hour to save performance
+def get_market_data(ticker_str, bench, tf):
     interval = "1d" if tf == "Daily" else "1wk"
-    tickers = [t.strip() for t in ticker_list.split(",") if t.strip()]
-    all_list = list(set(tickers + [bench]))
-    
-    data_raw = yf.download(all_list, period="2y", interval=interval)
-    data = data_raw['Close'] if isinstance(data_raw.columns, pd.MultiIndex) else data_raw[['Close']]
-    data = data.dropna()
-    
-    rrg_results = {}
-    bench_price = data[bench]
-    
-    for t in tickers:
-        if t not in data.columns or t == bench: continue
-        
-        rel_price = (data[t] / bench_price) * 100
-        sma = rel_price.rolling(14).mean()
-        std = rel_price.rolling(14).std()
-        rs_ratio = 100 + ((rel_price - sma) / std)
-        
-        roc = rs_ratio.pct_change(1) * 100
-        roc_sma = roc.rolling(14).mean()
-        roc_std = roc.rolling(14).std()
-        rs_momentum = 100 + ((roc - roc_sma) / roc_std)
-        
-        raw_tail = pd.DataFrame({'x': rs_ratio, 'y': rs_momentum}).dropna().tail(tail)
-        if len(raw_tail) < 3: continue
+    t_list = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
+    full_list = list(set(t_list + [bench.upper()]))
+    raw = yf.download(full_list, period="2y", interval=interval)
+    data = raw['Close'] if isinstance(raw.columns, pd.MultiIndex) else raw[['Close']]
+    return data.dropna(), t_list
 
-        t_raw = np.arange(len(raw_tail))
-        t_smooth = np.linspace(0, len(raw_tail)-1, len(raw_tail)*5)
-        fx = interp1d(t_raw, raw_tail['x'], kind='cubic')
-        fy = interp1d(t_raw, raw_tail['y'], kind='cubic')
-        rrg_results[t] = pd.DataFrame({'x': fx(t_smooth), 'y': fy(t_smooth)})
-
-    return rrg_results
-
-# --- Plotting ---
+# --- Execution ---
 try:
-    results = get_rrg_data(user_tickers, benchmark, timeframe, tail_length)
-    fig = go.Figure()
-
-    # 1. Add Quadrant Lines
-    fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="black", width=2))
-    fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="black", width=2))
-
-    # 2. UPDATED: Quadrant Labels at the outer 104/96 edges for clarity
-    fig.add_annotation(x=104, y=104, text="LEADING", showarrow=False, font=dict(color="green", size=18, family="Arial Black"))
-    fig.add_annotation(x=96, y=104, text="IMPROVING", showarrow=False, font=dict(color="blue", size=18, family="Arial Black"))
-    fig.add_annotation(x=96, y=96, text="LAGGING", showarrow=False, font=dict(color="red", size=18, family="Arial Black"))
-    fig.add_annotation(x=104, y=96, text="WEAKENING", showarrow=False, font=dict(color="#FF8C00", size=18, family="Arial Black"))
-
-    # 3. Add smoothed tails and Directional Arrows
-    for ticker, df in results.items():
-        line_color = px.colors.qualitative.Plotly[list(results.keys()).index(ticker) % 10]
-        fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='lines', 
-                                 name=ticker, line=dict(width=3, color=line_color)))
+    data, t_list = get_market_data(tickers_input, benchmark, timeframe)
+    bench_ticker = benchmark.upper()
+    
+    # RRG Math
+    rrg_dict = {}
+    table_rows = []
+    
+    for t in t_list:
+        if t not in data.columns or t == bench_ticker: continue
         
-        # Arrowhead
-        fig.add_annotation(
-            x=df['x'].iloc[-1], y=df['y'].iloc[-1],
-            ax=df['x'].iloc[-2], ay=df['y'].iloc[-2],
-            xref="x", yref="y", axref="x", ayref="y",
-            showarrow=True, arrowhead=2, arrowsize=2, arrowwidth=3, arrowcolor=line_color
-        )
-        # Label next to Arrow
-        fig.add_annotation(
-            x=df['x'].iloc[-1], y=df['y'].iloc[-1],
-            text=f"<b>{ticker}</b>", showarrow=False, yshift=15, font=dict(color=line_color, size=13)
-        )
+        rel = (data[t] / data[bench_ticker]) * 100
+        # RRG Stats (14-period)
+        rs_ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
+        mom = rs_ratio.pct_change(1) * 100
+        rs_mom = 100 + ((mom - mom.rolling(14).mean()) / mom.rolling(14).std())
+        
+        # Rankings Data
+        table_rows.append({
+            "Ticker": t, "Fund Name": FUND_MAP.get(t, "Individual Stock"),
+            "Quadrant": "LEADING" if rs_ratio.iloc[-1] > 100 and rs_mom.iloc[-1] > 100 else "IMPROVING" if rs_ratio.iloc[-1] < 100 and rs_mom.iloc[-1] > 100 else "LAGGING" if rs_ratio.iloc[-1] < 100 and rs_mom.iloc[-1] < 100 else "WEAKENING",
+            "RS-Ratio": round(rs_ratio.iloc[-1], 2), "Momentum": round(rs_mom.iloc[-1], 2)
+        })
 
-    fig.update_layout(
-        template="plotly_white", 
-        xaxis=dict(title="RS-Ratio", range=[95, 105], gridcolor='lightgray'), 
-        yaxis=dict(title="RS-Momentum", range=[95, 105], gridcolor='lightgray'),
-        height=850, width=850, margin=dict(l=20, r=20, t=50, b=20)
-    )
-    st.plotly_chart(fig, use_container_width=True)
+        # Smooth Tail
+        rt = pd.DataFrame({'x': rs_ratio, 'y': rs_mom}).dropna().tail(tail_len)
+        if len(rt) > 3:
+            tr = np.arange(len(rt)); ts = np.linspace(0, len(rt)-1, len(rt)*5)
+            rrg_dict[t] = pd.DataFrame({'x': interp1d(tr, rt['x'], kind='cubic')(ts), 'y': interp1d(tr, rt['y'], kind='cubic')(ts)})
+
+    # Layout: Chart and Table
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        fig = go.Figure()
+        fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="black", width=2))
+        fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="black", width=2))
+        
+        vis = True if show_all else "legendonly"
+        for i, (t, df) in enumerate(rrg_dict.items()):
+            color = px.colors.qualitative.Plotly[i % 10]
+            fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='lines', name=t, line=dict(width=3, color=color), visible=vis))
+            fig.add_annotation(x=df['x'].iloc[-1], y=df['y'].iloc[-1], ax=df['x'].iloc[-2], ay=df['y'].iloc[-2], showarrow=True, arrowhead=2, arrowcolor=color, text=f"<b> {t} </b>", bgcolor=color, font=dict(color="white"), yshift=15)
+        
+        fig.update_layout(height=700, template="plotly_white", xaxis=dict(range=[95, 105]), yaxis=dict(range=[95, 105]))
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.subheader("Leaderboard")
+        rank_df = pd.DataFrame(table_data).sort_values(by="RS-Ratio", ascending=False)
+        st.dataframe(rank_df, height=650)
+
+    # --- NEW: THE RELATIVE STRENGTH LINE CHART ---
+    st.markdown("---")
+    st.subheader("📈 Long-Term Relative Strength Trend")
+    selected_stock = st.selectbox("Select a stock to view its RS Line vs Benchmark:", t_list)
+    
+    if selected_stock:
+        # RS Line = (Stock / Benchmark) indexed to 100 at the start of the period
+        rs_line = (data[selected_stock] / data[bench_ticker])
+        rs_line = (rs_line / rs_line.iloc[0]) * 100
+        
+        fig_rs = px.line(rs_line, title=f"{selected_stock} vs {bench_ticker} (Indexed to 100)", labels={"value": "Relative Strength", "Date": "Date"})
+        fig_rs.add_hline(y=100, line_dash="dash", line_color="red")
+        fig_rs.update_layout(template="plotly_white", height=400)
+        st.plotly_chart(fig_rs, use_container_width=True)
 
 except Exception as e:
-    st.error(f"Waiting for data... Ensure all tickers are valid for {benchmark} comparison.")
+    st.error(f"Wait... Error: {e}")
