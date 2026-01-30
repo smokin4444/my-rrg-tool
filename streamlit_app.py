@@ -6,137 +6,108 @@ import plotly.express as px
 import plotly.graph_objects as go
 from scipy.interpolate import interp1d
 
-st.set_page_config(page_title="Pro-RRG Dashboard", layout="wide")
-
-st.title("📈 Professional Relative Rotation Graph")
+st.set_page_config(page_title="Regime-Aware Alpha Scanner", layout="wide")
 
 # --- Persistent Ticker Management ---
+# Added XLP for Risk-Off and IGV for Software/AI Pressure
 MY_MINERS = "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB"
-SECTOR_ETFS = "XLC, XLY, XLP, XLE, XLF, XLV, XLI, XLB, XLRE, XLK, XLU"
+THEMATIC_HEAPS = "SOXX, IGV, XLP, MAGS, URA, COPX, GDXJ, SILJ, BITO, ITA, POWR, XME"
 
 FUND_MAP = {
-    "XLC": "Comm. Services", "XLY": "Cons. Discretionary", "XLP": "Cons. Staples",
-    "XLE": "Energy", "XLF": "Financials", "XLV": "Health Care",
-    "XLI": "Industrials", "XLB": "Materials", "XLRE": "Real Estate",
-    "XLK": "Technology", "XLU": "Utilities", "XBI": "Biotech",
-    "XME": "Metals & Mining", "XSD": "Semiconductors", "XOP": "Oil & Gas Exploration",
-    "GDXJ": "Junior Gold Miners", "COPX": "Copper Miners", "REMX": "Strategic Metals"
+    "SOXX": "Semiconductors", "IGV": "Software (AI Pressure)", "XLP": "Consumer Staples (Risk-Off)",
+    "MAGS": "Mag Seven", "URA": "Uranium", "COPX": "Copper", "GDXJ": "Junior Gold", 
+    "SILJ": "Junior Silver", "BITO": "Bitcoin", "ITA": "Defense", "POWR": "Power Infra", 
+    "XME": "Metals", "XLE": "Energy", "XLB": "Materials", "XLK": "Technology"
 }
 
 # --- Sidebar ---
 with st.sidebar:
-    st.header("Settings")
-    heap_type = st.radio("Choose Watchlist:", ["My Miners", "Sector ETFs", "Custom List"])
-    
-    current_list = MY_MINERS if heap_type == "My Miners" else SECTOR_ETFS if heap_type == "Sector ETFs" else st.session_state.get('custom_list', MY_MINERS)
-
-    tickers_input = st.text_area("Tickers:", value=current_list)
+    st.header("Dashboard Controls")
+    heap_type = st.radio("Watchlist:", ["My Miners", "Thematic Heaps", "Custom"])
+    current_list = MY_MINERS if heap_type == "My Miners" else THEMATIC_HEAPS if heap_type == "Thematic Heaps" else st.session_state.get('custom_list', MY_MINERS)
+    tickers_input = st.text_area("Ticker Heap:", value=current_list)
     benchmark = st.text_input("Benchmark:", value="SPY")
     timeframe = st.radio("Timeframe:", ["Daily", "Weekly"], index=1)
     tail_len = st.slider("Tail Length:", 5, 30, 15)
 
-# --- Math & Smoothing Engine ---
+# --- Math Engine ---
 @st.cache_data(ttl=3600)
 def get_rrg_data(ticker_list, bench, tf, tail):
     interval = "1d" if tf == "Daily" else "1wk"
     tickers = [t.strip().upper() for t in ticker_list.split(",") if t.strip()]
-    all_list = list(set(tickers + [bench.upper()]))
-    
+    all_list = list(set(tickers + [bench.upper(), "^VIX"]))
     data_raw = yf.download(all_list, period="2y", interval=interval)
-    data = data_raw['Close'] if isinstance(data_raw.columns, pd.MultiIndex) else data_raw[['Close']]
+    
+    close_data = data_raw['Close'] if isinstance(data_raw.columns, pd.MultiIndex) else data_raw[['Close']]
     vol_raw = data_raw['Volume'] if isinstance(data_raw.columns, pd.MultiIndex) else data_raw[['Volume']]
-    data = data.dropna()
     
-    rrg_results = {}
-    table_data = []
-    bench_price = data[bench.upper()]
+    # RS Rating logic
+    perf_scores = {}
+    valid_tickers = [t for t in tickers if t in close_data.columns]
+    for t in valid_tickers:
+        px_curr = close_data[t].iloc[-1]
+        px_3m = close_data[t].iloc[-63] if len(close_data) > 63 else close_data[t].iloc[0]
+        perf_scores[t] = (px_curr / px_3m) * 100
     
-    for t in tickers:
-        if t not in data.columns or t == bench.upper(): continue
-        
-        rel_price = (data[t] / bench_price) * 100
-        sma = rel_price.rolling(14).mean()
-        std = rel_price.rolling(14).std()
-        rs_ratio = 100 + ((rel_price - sma) / std)
-        
+    sorted_scores = sorted(perf_scores.values())
+    rs_ratings = {t: int((sorted_scores.index(s) / len(sorted_scores)) * 99) if len(sorted_scores) > 0 else 0 for t, s in perf_scores.items()}
+
+    rrg_results, table_data = {}, []
+    for t in valid_tickers:
+        if t == bench.upper(): continue
+        rel = (close_data[t] / close_data[bench.upper()]) * 100
+        rs_ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = rs_ratio.pct_change(1) * 100
-        rs_momentum = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
+        rs_mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
         
-        # Volume
-        rel_vol = (vol_raw[t].iloc[-1] / vol_raw[t].tail(20).mean())
+        vel = np.sqrt((rs_ratio.iloc[-1] - rs_ratio.iloc[-5])**2 + (rs_mom.iloc[-1] - rs_mom.iloc[-5])**2)
+        r_vol = (vol_raw[t].iloc[-1] / vol_raw[t].tail(20).mean())
+        ch_score = (vel * 0.7) + (r_vol * 0.3)
         
-        r_val, m_val = rs_ratio.iloc[-1], rs_momentum.iloc[-1]
-        quad = "LEADING" if r_val >= 100 and m_val >= 100 else "IMPROVING" if r_val < 100 and m_val >= 100 else "LAGGING" if r_val < 100 and m_val < 100 else "WEAKENING"
-        
-        table_data.append({"Ticker": t, "Name": FUND_MAP.get(t, "Stock"), "Quadrant": quad, "RS-Ratio": round(r_val, 2), "Momentum": round(m_val, 2), "Rel Volume": f"{round(rel_vol, 2)}x"})
+        table_data.append({
+            "Ticker": t, "Name": FUND_MAP.get(t, "Stock"), 
+            "RS Rating": rs_ratings.get(t, 0), "CH Score": round(ch_score, 2),
+            "Velocity": round(vel, 2), "Rel Vol": round(r_vol, 2)
+        })
 
-        raw_tail = pd.DataFrame({'x': rs_ratio, 'y': rs_momentum}).dropna().tail(tail)
-        if len(raw_tail) >= 3:
-            t_raw = np.arange(len(raw_tail))
-            t_smooth = np.linspace(0, len(raw_tail)-1, len(raw_tail)*5)
-            rrg_results[t] = pd.DataFrame({'x': interp1d(t_raw, raw_tail['x'], kind='cubic')(t_smooth), 
-                                           'y': interp1d(t_raw, raw_tail['y'], kind='cubic')(t_smooth)})
+        rt = pd.DataFrame({'x': rs_ratio, 'y': rs_mom}).dropna().tail(tail)
+        if len(rt) >= 3:
+            tr = np.arange(len(rt)); ts = np.linspace(0, len(rt)-1, len(rt)*5)
+            rrg_results[t] = pd.DataFrame({'x': interp1d(tr, rt['x'], kind='cubic')(ts), 'y': interp1d(tr, rt['y'], kind='cubic')(ts)})
+            
+    return rrg_results, table_data, close_data
 
-    return rrg_results, table_data, data, tickers
-
-# --- Plotting ---
+# --- Execution ---
 try:
-    results, table_list, full_data, tickers_list = get_rrg_data(tickers_input, benchmark, timeframe, tail_len)
+    results, table_list, full_data = get_rrg_data(tickers_input, benchmark, timeframe, tail_len)
     
-    fig = go.Figure()
+    # TOP HEADER: VIX REGIME & ALERTS
+    current_vix = full_data["^VIX"].iloc[-1]
+    vix_col, alert_col = st.columns([1, 2])
+    
+    with vix_col:
+        if current_vix < 15: st.info(f"🛡️ VIX: {current_vix:.2f} (Low)")
+        elif 15 <= current_vix <= 25: st.success(f"⚖️ VIX: {current_vix:.2f} (Normal)")
+        else: st.error(f"⚠️ VIX: {current_vix:.2f} (Danger)")
 
-    # Quadrant Lines
+    with alert_col:
+        top_pick = sorted(table_list, key=lambda x: x['CH Score'], reverse=True)[0]
+        st.warning(f"🎯 **TOP CONVICTION:** {top_pick['Ticker']} | CH Score: {top_pick['CH Score']}")
+
+    # 1. RRG CHART
+    fig = go.Figure()
     fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="black", width=2))
     fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="black", width=2))
-
-    # Add smoothed tails and directional Arrows
-    for i, (ticker, df) in enumerate(results.items()):
-        line_color = px.colors.qualitative.Plotly[i % 10]
-
-        # 1. The Line
-        fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='lines', 
-                                 name=ticker, line=dict(width=2, color=line_color), 
-                                 showlegend=True))
-        
-        # 2. The Arrow (Using Annotations - much more reliable)
-        fig.add_annotation(
-            x=df['x'].iloc[-1],
-            y=df['y'].iloc[-1],
-            ax=df['x'].iloc[-2],
-            ay=df['y'].iloc[-2],
-            xref="x", yref="y",
-            axref="x", ayref="y",
-            showarrow=True,
-            arrowhead=2,
-            arrowsize=2,
-            arrowwidth=2,
-            arrowcolor=line_color,
-            name=ticker # This helps with visibility grouping
-        )
-
-    fig.update_layout(
-        template="plotly_white", 
-        xaxis=dict(title="RS-Ratio", range=[96, 104]), 
-        yaxis=dict(title="RS-Momentum", range=[96, 104]),
-        height=800,
-        legend=dict(itemclick="toggle", itemdoubleclick="toggleothers")
-    )
-
+    for i, (t, df) in enumerate(results.items()):
+        color = px.colors.qualitative.Plotly[i % 10]
+        fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='lines', name=t, line=dict(width=2, color=color)))
+        fig.add_annotation(x=df['x'].iloc[-1], y=df['y'].iloc[-1], ax=df['x'].iloc[-2], ay=df['y'].iloc[-2], showarrow=True, arrowhead=2, arrowsize=2, arrowcolor=color)
+    fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=[96, 104]), yaxis=dict(range=[96, 104]), legend=dict(orientation="h", y=1.05))
     st.plotly_chart(fig, use_container_width=True)
 
-    # Leaderboard
-    st.markdown("---")
-    st.subheader("📊 Leaderboard")
-    st.dataframe(pd.DataFrame(table_list).sort_values(by="RS-Ratio", ascending=False), use_container_width=True)
-
-    # RS Line
-    st.markdown("---")
-    st.subheader("📈 RS Line Trend")
-    sel = st.selectbox("Select Ticker:", list(results.keys()))
-    if sel:
-        rs_line = (full_data[sel] / full_data[benchmark.upper()])
-        rs_line = (rs_line / rs_line.iloc[0]) * 100
-        st.plotly_chart(px.line(rs_line, title=f"{sel} vs {benchmark.upper()}").add_hline(y=100, line_dash="dash", line_color="red"), use_container_width=True)
+    # 2. THE SCANNER
+    st.subheader("📊 The Alpha Scanner")
+    st.dataframe(pd.DataFrame(table_list).sort_values(by="CH Score", ascending=False), use_container_width=True)
 
 except Exception as e:
     st.error(f"Error: {e}")
