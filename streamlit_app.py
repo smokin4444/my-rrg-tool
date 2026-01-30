@@ -83,7 +83,6 @@ def get_rrg_data(ticker_list, bench, tf, tail):
 try:
     results, table_list, full_data = get_rrg_data(tickers_input, benchmark, timeframe, tail_len)
     
-    # VIX REGIME ALERT
     vix = full_data["^VIX"].iloc[-1]
     st.info(f"🛡️ **VIX Regime:** {vix:.2f}")
 
@@ -94,26 +93,30 @@ try:
     
     for i, (t, df) in enumerate(results.items()):
         color = px.colors.qualitative.Plotly[i % 10]
-        fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='lines', name=t, line=dict(width=1.5, color=color), legendgroup=t))
-        fig.add_trace(go.Scatter(x=[df['x'].iloc[-1]], y=[df['y'].iloc[-1]], mode='markers', marker=dict(symbol='triangle-up', size=14, color=color, angleref='previous'), legendgroup=t, showlegend=False, hoverinfo='skip'))
+        
+        # 1. THE TRAIL (Faded, thinner line)
+        fig.add_trace(go.Scatter(
+            x=df['x'], y=df['y'], mode='lines', name=t, 
+            line=dict(width=1, color=color, dash='solid'),
+            opacity=0.4, legendgroup=t
+        ))
+        
+        # 2. THE CURRENT HEAD (Large Diamond - No rotation needed)
+        fig.add_trace(go.Scatter(
+            x=[df['x'].iloc[-1]], y=[df['y'].iloc[-1]],
+            mode='markers+text',
+            marker=dict(symbol='diamond', size=12, color=color, line=dict(width=2, color='white')),
+            text=[t], textposition="top center",
+            legendgroup=t, showlegend=False
+        ))
     
-    fig.update_layout(template="plotly_white", height=850, xaxis=dict(title="RS-Ratio", range=[96, 104]), yaxis=dict(title="RS-Momentum", range=[96, 104]), legend=dict(orientation="h", y=1.05, itemclick="toggle", itemdoubleclick="toggleothers"))
+    fig.update_layout(template="plotly_white", height=850, xaxis=dict(title="RS-Ratio", range=[96, 104]), yaxis=dict(title="RS-Momentum", range=[96, 104]), legend=dict(orientation="h", y=1.05, itemclick="toggle"))
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- LEADERBOARD & STYLING ---
+    # --- LEADERBOARD ---
     st.subheader("📊 The Alpha Scanner")
     df_table = pd.DataFrame(table_list).sort_values(by="CH Score", ascending=False)
-
-    # Styling Logic
-    def style_dataframe(df):
-        # Bold CH Score
-        styled = df.style.map(lambda x: 'font-weight: bold; color: #1E88E5', subset=['CH Score'])
-        # Highlight Volume Spikes (> 2.5x)
-        styled = styled.map(lambda x: 'color: #D32F2F; font-weight: bold; background-color: #FFF9C4' if x > 2.5 else '', subset=['Rel Vol'])
-        # Format Rel Vol as a string for display
-        return styled.format({"Rel Vol": "{:.2f}x"})
-
-    st.dataframe(style_dataframe(df_table), use_container_width=True)
+    st.dataframe(df_table.style.map(lambda x: 'font-weight: bold; color: #1E88E5', subset=['CH Score']).map(lambda x: 'color: #D32F2F; font-weight: bold; background-color: #FFF9C4' if x > 2.5 else '', subset=['Rel Vol']).format({"Rel Vol": "{:.2f}x"}), use_container_width=True)
 
 except Exception as e:
     st.error(f"Dashboard Initialization Error: {e}")
