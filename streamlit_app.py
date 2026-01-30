@@ -1,37 +1,39 @@
-# --- Updated RRG CHART with Time Markers ---
-fig = go.Figure()
+# ... (Imports and Math Engine as before)
 
-# Quadrant Dividers
-fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.3)", width=3))
-fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.3)", width=3))
-
-for i, (t, df) in enumerate(results.items()):
+# --- THE FIX IN THE RRG CHART SECTION ---
+for i, (t, data) in enumerate(history[timeframe].items()):
+    df_full = data["df"]
+    df_sliced = df_full[df_full.index <= target_date].tail(tail_len)
+    
+    if len(df_sliced) < 3: continue
+    
     color = px.colors.qualitative.Plotly[i % 10]
     
-    # 1. THE TRAIL (Now with Lines + Dots)
+    # 1. THE TRAIL (Now with Lines + Period Dots)
     fig.add_trace(go.Scatter(
-        x=df['x'], 
-        y=df['y'], 
-        mode='lines+markers',  # This adds the time dots
+        x=df_sliced['x'], 
+        y=df_sliced['y'], 
+        mode='lines+markers',  # Adds dots for each day/week
         name=t, 
         line=dict(width=2, color=color),
         marker=dict(
-            size=5,            # Small dots for each time period
+            size=6,            # Size of the daily dots
             color=color,
-            opacity=0.6
+            opacity=0.6,
+            line=dict(width=1, color='white') # Makes dots crisp
         ),
-        opacity=0.5, 
+        opacity=0.4, 
         legendgroup=t
     ))
     
-    # 2. THE CURRENT HEAD (Large Diamond stays for clarity)
+    # 2. THE CURRENT HEAD (Large Diamond for the current date)
     fig.add_trace(go.Scatter(
-        x=[df['x'].iloc[-1]], 
-        y=[df['y'].iloc[-1]],
+        x=[df_sliced['x'].iloc[-1]], 
+        y=[df_sliced['y'].iloc[-1]],
         mode='markers+text',
         marker=dict(
             symbol='diamond', 
-            size=14, 
+            size=15, 
             color=color, 
             line=dict(width=2, color='white')
         ),
