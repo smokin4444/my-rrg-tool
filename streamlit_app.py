@@ -88,35 +88,55 @@ try:
 
     # --- RRG CHART ---
     fig = go.Figure()
-    fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="black", width=2))
-    fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="black", width=2))
+    # Thicker Quadrant Dividers for better orientation
+    fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.3)", width=3))
+    fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.3)", width=3))
     
     for i, (t, df) in enumerate(results.items()):
         color = px.colors.qualitative.Plotly[i % 10]
         
-        # 1. THE TRAIL (Faded, thinner line)
+        # 1. THE TRAIL (Thicker, solid line)
         fig.add_trace(go.Scatter(
             x=df['x'], y=df['y'], mode='lines', name=t, 
-            line=dict(width=1, color=color, dash='solid'),
-            opacity=0.4, legendgroup=t
+            line=dict(width=2.5, color=color), # Increased width for better visibility
+            opacity=0.5, legendgroup=t
         ))
         
-        # 2. THE CURRENT HEAD (Large Diamond - No rotation needed)
+        # 2. THE CURRENT HEAD (Large Diamond)
         fig.add_trace(go.Scatter(
             x=[df['x'].iloc[-1]], y=[df['y'].iloc[-1]],
             mode='markers+text',
-            marker=dict(symbol='diamond', size=12, color=color, line=dict(width=2, color='white')),
+            marker=dict(
+                symbol='diamond', 
+                size=14, # Slightly larger diamond
+                color=color, 
+                line=dict(width=2, color='white') # White border to make it pop
+            ),
             text=[t], textposition="top center",
+            textfont=dict(size=10, color="black"),
             legendgroup=t, showlegend=False
         ))
     
-    fig.update_layout(template="plotly_white", height=850, xaxis=dict(title="RS-Ratio", range=[96, 104]), yaxis=dict(title="RS-Momentum", range=[96, 104]), legend=dict(orientation="h", y=1.05, itemclick="toggle"))
+    fig.update_layout(
+        template="plotly_white", 
+        height=850, 
+        xaxis=dict(title="RS-Ratio (Strength)", range=[96, 104], gridcolor='lightgrey'), 
+        yaxis=dict(title="RS-Momentum (Velocity)", range=[96, 104], gridcolor='lightgrey'), 
+        legend=dict(orientation="h", y=1.05, itemclick="toggle")
+    )
     st.plotly_chart(fig, use_container_width=True)
 
     # --- LEADERBOARD ---
     st.subheader("📊 The Alpha Scanner")
     df_table = pd.DataFrame(table_list).sort_values(by="CH Score", ascending=False)
-    st.dataframe(df_table.style.map(lambda x: 'font-weight: bold; color: #1E88E5', subset=['CH Score']).map(lambda x: 'color: #D32F2F; font-weight: bold; background-color: #FFF9C4' if x > 2.5 else '', subset=['Rel Vol']).format({"Rel Vol": "{:.2f}x"}), use_container_width=True)
+    
+    # Styled Table
+    st.dataframe(
+        df_table.style.map(lambda x: 'font-weight: bold; color: #1E88E5', subset=['CH Score'])
+        .map(lambda x: 'color: #D32F2F; font-weight: bold; background-color: #FFF9C4' if x > 2.5 else '', subset=['Rel Vol'])
+        .format({"Rel Vol": "{:.2f}x"}), 
+        use_container_width=True
+    )
 
 except Exception as e:
     st.error(f"Dashboard Initialization Error: {e}")
