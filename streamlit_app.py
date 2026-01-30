@@ -3,14 +3,19 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import plotly.express as px
 from scipy.interpolate import interp1d
+from datetime import datetime
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
-# --- MASTER TICKER HEAP ---
+# --- CONSOLIDATED TICKER GROUPS ---
 MINERS = "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB"
-THEMES = "URA, COPX, GDXJ, SILJ, IBIT, ITA, POWR, XME, SOXX, IGV, MAGS"
-SECTORS = "XLC, XLY, XLP, XLE, XLF, XLV, XLI, XLB, XLRE, XLK, XLU"
+# Merged Thematic and Sectors into one master list
+MARKET_GROUPS = (
+    "URA, COPX, GDXJ, SILJ, IBIT, ITA, POWR, XME, SOXX, IGV, MAGS, "
+    "XLC, XLY, XLP, XLE, XLF, XLV, XLI, XLB, XLRE, XLK, XLU"
+)
 
 FUND_MAP = {
     "SOXX": "Semiconductors", "IGV": "Software", "XLP": "Cons. Staples",
@@ -23,15 +28,15 @@ FUND_MAP = {
 
 # --- Sidebar ---
 with st.sidebar:
-    st.header("🎯 Watchlist")
-    heap_type = st.radio("Choose Group:", ["My Miners", "Thematic Heaps", "Sector ETFs", "Custom"])
+    st.header("🎯 Watchlist Selection")
+    # Consolidated radio buttons
+    heap_type = st.radio("Choose Group:", ["My Miners", "Market Themes & Sectors", "Custom"])
     
     if heap_type == "My Miners": current_list = MINERS
-    elif heap_type == "Thematic Heaps": current_list = THEMES
-    elif heap_type == "Sector ETFs": current_list = SECTORS
+    elif heap_type == "Market Themes & Sectors": current_list = MARKET_GROUPS
     else: current_list = st.session_state.get('custom_list', MINERS)
 
-    tickers_input = st.text_area("Ticker Heap:", value=current_list, height=100)
+    tickers_input = st.text_area("Ticker Heap:", value=current_list, height=120)
     benchmark = st.text_input("Benchmark:", value="SPY")
     
     st.markdown("---")
@@ -63,10 +68,10 @@ def get_full_analysis(ticker_str, bench):
         if t not in d_raw['Close'].columns: continue
         
         def calc_metrics(df):
-            px = df['Close'][t].dropna()
-            bx = df['Close'][bench.upper()].dropna()
-            common = px.index.intersection(bx.index)
-            rel = (px.loc[common] / bx.loc[common]) * 100
+            px_data = df['Close'][t].dropna()
+            bx_data = df['Close'][bench.upper()].dropna()
+            common = px_data.index.intersection(bx_data.index)
+            rel = (px_data.loc[common] / bx_data.loc[common]) * 100
             ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
             roc = ratio.pct_change(1) * 100
             mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
@@ -78,11 +83,9 @@ def get_full_analysis(ticker_str, bench):
         d_rat, d_mom, d_ch, d_rv = calc_metrics(d_raw)
         w_rat, w_mom, w_ch, _ = calc_metrics(w_raw)
         
-        # Store for Chart
         history["Daily"][t] = pd.DataFrame({'x': d_rat, 'y': d_mom}).dropna()
         history["Weekly"][t] = pd.DataFrame({'x': w_rat, 'y': w_mom}).dropna()
         
-        # Store for Table
         d_q = get_quadrant(d_rat.iloc[-1], d_mom.iloc[-1])
         w_q = get_quadrant(w_rat.iloc[-1], w_mom.iloc[-1])
         status = "BULLISH SYNC" if d_q == "LEADING" and w_q == "LEADING" else \
@@ -98,33 +101,33 @@ def get_full_analysis(ticker_str, bench):
 
 # --- Execution ---
 try:
-    df_main, history, vix_val = get_full_analysis(tickers_input, benchmark)
+    df_main, history_data, vix_val = get_full_analysis(tickers_input, benchmark)
     
-    st.info(f"🛡️ **VIX:** {vix_val:.2f} | **Current Regime:** {timeframe} Analysis")
+    st.info(f"🛡️ **VIX:** {vix_val:.2f} | **Target Benchmark:** {benchmark.upper()}")
 
-    # 1. RRG CHART (With Dots)
+    # 1. RRG CHART (With Dots & Diamonds)
     st.subheader(f"🌀 {timeframe} Rotation (Diamonds & Period Dots)")
     fig = go.Figure()
     fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.2)", width=2))
     fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.2)", width=2))
     
-    for i, (t, df) in enumerate(history[timeframe].items()):
+    for i, (t, df) in enumerate(history_data[timeframe].items()):
         if filter_setups and t not in df_main[df_main['Sync Status'].isin(["BULLISH SYNC", "DAILY PIVOT"])]['Ticker'].values:
             continue
             
         color = px.colors.qualitative.Plotly[i % 10]
         df_plot = df.tail(tail_len)
         
-        # The Trail with Dots
+        # Line + Dots
         fig.add_trace(go.Scatter(
             x=df_plot['x'], y=df_plot['y'], 
             mode='lines+markers', name=t,
-            line=dict(width=2, color=color),
+            line=dict(width=2.5, color=color),
             marker=dict(size=6, color=color, opacity=0.6, line=dict(width=1, color='white')),
             opacity=0.4, legendgroup=t
         ))
         
-        # The Current Diamond Head
+        # Diamond Head
         fig.add_trace(go.Scatter(
             x=[df_plot['x'].iloc[-1]], y=[df_plot['y'].iloc[-1]],
             mode='markers+text',
@@ -139,6 +142,7 @@ try:
     # 2. ALIGNMENT GRID
     st.subheader("📊 Dual-Timeframe Alpha Grid")
     
+    # Custom Sort: Bullish Sync first, then Daily Pivot
     df_main['sort_val'] = df_main['Sync Status'].map({"BULLISH SYNC": 0, "DAILY PIVOT": 1, "DIVERGED": 2, "BEARISH SYNC": 3})
     df_display = df_main.sort_values(by=['sort_val', 'Daily CH'], ascending=[True, False])
     
