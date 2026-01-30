@@ -63,13 +63,13 @@ def get_rrg_data(ticker_list, bench, tf, tail):
         rs_mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
         
         vel = np.sqrt((rs_ratio.iloc[-1] - rs_ratio.iloc[-5])**2 + (rs_mom.iloc[-1] - rs_mom.iloc[-5])**2)
-        r_vol = (vol_raw[t].iloc[-1] / vol_raw[t].tail(20).mean())
-        ch_score = (vel * 0.7) + (r_vol * 0.3)
+        r_vol_val = (vol_raw[t].iloc[-1] / vol_raw[t].tail(20).mean())
+        ch_score = (vel * 0.7) + (r_vol_val * 0.3)
         
         table_data.append({
             "Ticker": t, "Name": FUND_MAP.get(t, "Stock"), 
             "RS Rating": rs_ratings.get(t, 0), "CH Score": round(ch_score, 2),
-            "Velocity": round(vel, 2), "Rel Vol": f"{round(r_vol, 2)}x"
+            "Velocity": round(vel, 2), "Rel Vol": r_vol_val
         })
 
         rt = pd.DataFrame({'x': rs_ratio, 'y': rs_mom}).dropna().tail(tail)
@@ -89,50 +89,31 @@ try:
 
     # --- RRG CHART ---
     fig = go.Figure()
-    # Quadrant Dividers
     fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="black", width=2))
     fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="black", width=2))
     
     for i, (t, df) in enumerate(results.items()):
         color = px.colors.qualitative.Plotly[i % 10]
-        
-        # 1. THE SNAKE (The Trail)
-        fig.add_trace(go.Scatter(
-            x=df['x'], y=df['y'], mode='lines', name=t, 
-            line=dict(width=1.5, color=color),
-            legendgroup=t, showlegend=True
-        ))
-        
-        # 2. THE ARROWHEAD (Heavy Triangle Marker)
-        # We use a second trace to place a large, directional triangle at the tip
-        fig.add_trace(go.Scatter(
-            x=[df['x'].iloc[-1]], y=[df['y'].iloc[-1]],
-            mode='markers',
-            marker=dict(
-                symbol='triangle-up', # Solid triangle is more reliable than the 'arrow' symbol
-                size=14, 
-                color=color, 
-                angleref='previous' # Points triangle in direction of tail
-            ),
-            legendgroup=t, showlegend=False, # Hides/Shows with the line trace
-            hoverinfo='skip'
-        ))
+        fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='lines', name=t, line=dict(width=1.5, color=color), legendgroup=t))
+        fig.add_trace(go.Scatter(x=[df['x'].iloc[-1]], y=[df['y'].iloc[-1]], mode='markers', marker=dict(symbol='triangle-up', size=14, color=color, angleref='previous'), legendgroup=t, showlegend=False, hoverinfo='skip'))
     
-    fig.update_layout(
-        template="plotly_white", height=850, 
-        xaxis=dict(title="RS-Ratio", range=[96, 104]), 
-        yaxis=dict(title="RS-Momentum", range=[96, 104]),
-        legend=dict(orientation="h", y=1.05),
-        # Fixes the toggle behavior in the legend
-        itemclick="toggle", itemdoubleclick="toggleothers"
-    )
+    fig.update_layout(template="plotly_white", height=850, xaxis=dict(title="RS-Ratio", range=[96, 104]), yaxis=dict(title="RS-Momentum", range=[96, 104]), legend=dict(orientation="h", y=1.05, itemclick="toggle", itemdoubleclick="toggleothers"))
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- LEADERBOARD ---
+    # --- LEADERBOARD & STYLING ---
     st.subheader("📊 The Alpha Scanner")
     df_table = pd.DataFrame(table_list).sort_values(by="CH Score", ascending=False)
-    # Apply Bold to CH Score Column
-    st.dataframe(df_table.style.map(lambda x: 'font-weight: bold; color: #1E88E5', subset=['CH Score']), use_container_width=True)
+
+    # Styling Logic
+    def style_dataframe(df):
+        # Bold CH Score
+        styled = df.style.map(lambda x: 'font-weight: bold; color: #1E88E5', subset=['CH Score'])
+        # Highlight Volume Spikes (> 2.5x)
+        styled = styled.map(lambda x: 'color: #D32F2F; font-weight: bold; background-color: #FFF9C4' if x > 2.5 else '', subset=['Rel Vol'])
+        # Format Rel Vol as a string for display
+        return styled.format({"Rel Vol": "{:.2f}x"})
+
+    st.dataframe(style_dataframe(df_table), use_container_width=True)
 
 except Exception as e:
     st.error(f"Dashboard Initialization Error: {e}")
