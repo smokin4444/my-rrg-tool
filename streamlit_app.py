@@ -18,32 +18,28 @@ STARTUP_THEMES = (
     "UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
 )
 
+RETAIL_SEMIS = "NVDA, AMD, SMCI, AVGO, ARM, MU, TSM, ASML, KLAC, LRCX, MRVL, MSTR, ALAB, ASTS, APLD, WOLF, AEHR, SOUN, GCT, VRT"
+
 MINERS = "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB, MU, APLD"
 
-# Name Mapping for the Master List
+# Name Mapping
 FUND_MAP = {
-    "SOXX": "Semiconductors", "IGV": "Software", "XLP": "Cons. Staples",
-    "MAGS": "Mag Seven", "URA": "Uranium", "COPX": "Copper", "GDXJ": "Junior Gold", 
-    "SILJ": "Junior Silver", "IBIT": "Spot Bitcoin", "ITA": "Defense", "POWR": "Power Infra", 
-    "XME": "Metals & Mining", "XLC": "Comm. Services", "XLY": "Cons. Disc.", "XLE": "Energy", 
-    "XLF": "Financials", "XLV": "Health Care", "XLI": "Industrials", 
-    "XLB": "Materials", "XLRE": "Real Estate", "XLK": "Technology", "XLU": "Utilities",
-    "HG=F": "Copper Futures", "MU": "Micron", "APLD": "Applied Digital"
+    "SOXX": "Semiconductors", "IBIT": "Spot Bitcoin", "COPX": "Copper", "URA": "Uranium", "ASTS": "AST SpaceMobile"
 }
 
 # --- Sidebar ---
 with st.sidebar:
-    st.header("🎯 Watchlist Selection")
-    heap_type = st.radio("Choose Group:", ["Master Themes", "Startup", "My Miners", "Custom"])
+    st.header("🎯 Watchlist")
+    heap_type = st.radio("Choose Group:", ["Master Themes", "Startup", "Retail Semis", "My Miners", "Custom"])
     
     if heap_type == "Master Themes": current_list = MASTER_THEMES
     elif heap_type == "Startup": current_list = STARTUP_THEMES
+    elif heap_type == "Retail Semis": current_list = RETAIL_SEMIS
     elif heap_type == "My Miners": current_list = MINERS
     else: current_list = st.session_state.get('custom_list', MASTER_THEMES)
 
     tickers_input = st.text_area("Ticker Heap:", value=current_list, height=200).replace("HG1!", "HG=F")
     benchmark = st.text_input("Benchmark:", value="SPY")
-    
     st.markdown("---")
     timeframe = st.radio("Chart Timeframe:", ["Daily", "Weekly"])
     tail_len = st.slider("Tail Length:", 5, 30, 15)
@@ -57,7 +53,10 @@ def get_quadrant(ratio, mom):
     return "WEAKENING"
 
 def get_sync_status(d_q, w_q, d_ratio):
-    if d_ratio > 101.5 and d_q == "WEAKENING": return "POWER WALK"
+    # PRIORITY 1: POWER WALK (The Elite Rest)
+    if d_ratio > 101.5 and d_q == "WEAKENING": 
+        return "POWER WALK"
+    # PRIORITY 2: THE SYNCS
     if d_q == "LEADING" and w_q == "LEADING": return "BULLISH SYNC"
     if d_q == "LEADING" and w_q == "IMPROVING": return "EARLY ACCEL"
     if d_q == "IMPROVING" and w_q == "LAGGING": return "DAILY PIVOT"
@@ -67,16 +66,14 @@ def get_sync_status(d_q, w_q, d_ratio):
 def get_full_analysis(ticker_str, bench):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
     all_list = list(set(tickers + [bench.upper(), "^VIX"]))
-    
-    d_raw = yf.download(all_list, period="2y", interval="1d", group_by='ticker', progress=False)
-    w_raw = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
+    data = yf.download(all_list, period="2y", interval="1d", group_by='ticker', progress=False)
+    w_data = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
     
     history, table_data = {"Daily": {}, "Weekly": {}}, []
 
     for t in tickers:
         try:
-            if t not in d_raw.columns.get_level_values(0): continue
-            
+            if t not in data.columns.get_level_values(0): continue
             def calc(df_raw, ticker, b_ticker):
                 px, bx = df_raw[ticker]['Close'].dropna(), df_raw[b_ticker]['Close'].dropna()
                 if len(px) < 40: return None
@@ -85,22 +82,19 @@ def get_full_analysis(ticker_str, bench):
                 ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
                 roc = ratio.pct_change(1)*100
                 mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
-                ch_score = np.sqrt((ratio.iloc[-1] - ratio.iloc[-5])**2 + (mom.iloc[-1] - mom.iloc[-5])**2)
+                ch = np.sqrt((ratio.iloc[-1] - ratio.iloc[-5])**2 + (mom.iloc[-1] - mom.iloc[-5])**2)
                 rv = (df_raw[ticker]['Volume'].iloc[-1] / df_raw[ticker]['Volume'].tail(20).mean())
-                return ratio, mom, round(ch_score, 2), rv
+                return ratio, mom, round(ch, 2), rv
 
-            d_res, w_res = calc(d_raw, t, bench.upper()), calc(w_raw, t, bench.upper())
-            
+            d_res, w_res = calc(data, t, bench.upper()), calc(w_data, t, bench.upper())
             if d_res and w_res:
                 history["Daily"][t] = pd.DataFrame({'x': d_res[0], 'y': d_res[1]}).dropna()
                 history["Weekly"][t] = pd.DataFrame({'x': w_res[0], 'y': w_res[1]}).dropna()
                 d_q, w_q = get_quadrant(d_res[0].iloc[-1], d_res[1].iloc[-1]), get_quadrant(w_res[0].iloc[-1], w_res[1].iloc[-1])
                 status = get_sync_status(d_q, w_q, d_res[0].iloc[-1])
-                
                 table_data.append({
                     "Ticker": t, "Name": FUND_MAP.get(t, ""), "Sync Status": status,
-                    "Daily Quad": d_q, "Weekly Quad": w_q,
-                    "Daily CH": d_res[2], "Weekly CH": w_res[2],
+                    "Daily Quad": d_q, "Weekly Quad": w_q, "Daily CH": d_res[2], "Weekly CH": w_res[2],
                     "RS-Ratio": round(d_res[0].iloc[-1], 2), "Rel Vol": d_res[3]
                 })
         except: continue
@@ -111,7 +105,7 @@ try:
     df_main, history_data = get_full_analysis(tickers_input, benchmark)
 
     # 1. RRG CHART
-    st.subheader(f"🌀 {timeframe} Rotation (Dots: Periodic Movement)")
+    st.subheader(f"🌀 {timeframe} Rotation")
     fig = go.Figure()
     fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="gray", width=1, dash="dash"))
     fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="gray", width=1, dash="dash"))
