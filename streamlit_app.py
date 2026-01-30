@@ -81,34 +81,57 @@ def get_rrg_data(ticker_list, bench, tf, tail):
 
 # --- Execution ---
 try:
-    # Initialize variables to prevent "not defined" errors
-    results = {}
-    table_list = []
-    
     results, table_list, full_data = get_rrg_data(tickers_input, benchmark, timeframe, tail_len)
     
     # VIX REGIME ALERT
     vix = full_data["^VIX"].iloc[-1]
     st.info(f"🛡️ **VIX Regime:** {vix:.2f}")
 
-    # RRG Chart
+    # --- RRG CHART ---
     fig = go.Figure()
+    # Quadrant Dividers
     fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="black", width=2))
     fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="black", width=2))
     
     for i, (t, df) in enumerate(results.items()):
         color = px.colors.qualitative.Plotly[i % 10]
-        fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='lines', name=t, line=dict(width=1.5, color=color), legendgroup=t))
-        fig.add_trace(go.Scatter(x=[df['x'].iloc[-1]], y=[df['y'].iloc[-1]], mode='markers', 
-                                 marker=dict(symbol='arrow', size=18, color=color, angleref='previous'), 
-                                 legendgroup=t, showlegend=False, hoverinfo='skip'))
+        
+        # 1. THE SNAKE (The Trail)
+        fig.add_trace(go.Scatter(
+            x=df['x'], y=df['y'], mode='lines', name=t, 
+            line=dict(width=1.5, color=color),
+            legendgroup=t, showlegend=True
+        ))
+        
+        # 2. THE ARROWHEAD (Heavy Triangle Marker)
+        # We use a second trace to place a large, directional triangle at the tip
+        fig.add_trace(go.Scatter(
+            x=[df['x'].iloc[-1]], y=[df['y'].iloc[-1]],
+            mode='markers',
+            marker=dict(
+                symbol='triangle-up', # Solid triangle is more reliable than the 'arrow' symbol
+                size=14, 
+                color=color, 
+                angleref='previous' # Points triangle in direction of tail
+            ),
+            legendgroup=t, showlegend=False, # Hides/Shows with the line trace
+            hoverinfo='skip'
+        ))
     
-    fig.update_layout(template="plotly_white", height=850, xaxis=dict(range=[96, 104]), yaxis=dict(range=[96, 104]), legend=dict(orientation="h", y=1.05))
+    fig.update_layout(
+        template="plotly_white", height=850, 
+        xaxis=dict(title="RS-Ratio", range=[96, 104]), 
+        yaxis=dict(title="RS-Momentum", range=[96, 104]),
+        legend=dict(orientation="h", y=1.05),
+        # Fixes the toggle behavior in the legend
+        itemclick="toggle", itemdoubleclick="toggleothers"
+    )
     st.plotly_chart(fig, use_container_width=True)
 
-    # SCANNER
+    # --- LEADERBOARD ---
     st.subheader("📊 The Alpha Scanner")
     df_table = pd.DataFrame(table_list).sort_values(by="CH Score", ascending=False)
+    # Apply Bold to CH Score Column
     st.dataframe(df_table.style.map(lambda x: 'font-weight: bold; color: #1E88E5', subset=['CH Score']), use_container_width=True)
 
 except Exception as e:
