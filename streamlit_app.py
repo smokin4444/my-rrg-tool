@@ -6,12 +6,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from scipy.interpolate import interp1d
 
-st.set_page_config(page_title="RRG & RS Line Dashboard", layout="wide")
+st.set_page_config(page_title="Pro-Rotation Dashboard", layout="wide")
 
 st.title("📈 Advanced Rotation & Relative Strength")
 
 # --- Persistent Ticker Management ---
-# Your preferred miners are set as the default "Heap"
 MY_MINERS = "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB"
 SECTOR_ETFS = "XLC, XLY, XLP, XLE, XLF, XLV, XLI, XLB, XLRE, XLK, XLU"
 
@@ -27,7 +26,6 @@ FUND_MAP = {
 # --- Sidebar ---
 with st.sidebar:
     st.header("1. Controls")
-    # Toggle between your Miners and the Broad Sectors
     heap_type = st.radio("Choose Watchlist:", ["My Miners", "Sector ETFs", "Custom List"])
     
     if heap_type == "My Miners":
@@ -46,7 +44,7 @@ with st.sidebar:
     show_all = st.checkbox("Show All on Chart", value=True)
 
 # --- Calculations ---
-@st.cache_data(ttl=3600) # Cache for 1 hour to save performance
+@st.cache_data(ttl=3600)
 def get_market_data(ticker_str, bench, tf):
     interval = "1d" if tf == "Daily" else "1wk"
     t_list = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
@@ -60,68 +58,78 @@ try:
     data, t_list = get_market_data(tickers_input, benchmark, timeframe)
     bench_ticker = benchmark.upper()
     
-    # RRG Math
     rrg_dict = {}
-    table_rows = []
+    table_rows = [] # Fix: Ensuring list is defined before the loop starts
     
     for t in t_list:
         if t not in data.columns or t == bench_ticker: continue
         
         rel = (data[t] / data[bench_ticker]) * 100
-        # RRG Stats (14-period)
         rs_ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         mom = rs_ratio.pct_change(1) * 100
         rs_mom = 100 + ((mom - mom.rolling(14).mean()) / mom.rolling(14).std())
         
-        # Rankings Data
+        # Rankings Data logic moved inside the loop
+        r_val = rs_ratio.iloc[-1]
+        m_val = rs_mom.iloc[-1]
+        quad = "LEADING" if r_val > 100 and m_val > 100 else "IMPROVING" if r_val < 100 and m_val > 100 else "LAGGING" if r_val < 100 and m_val < 100 else "WEAKENING"
+               
         table_rows.append({
             "Ticker": t, "Fund Name": FUND_MAP.get(t, "Individual Stock"),
-            "Quadrant": "LEADING" if rs_ratio.iloc[-1] > 100 and rs_mom.iloc[-1] > 100 else "IMPROVING" if rs_ratio.iloc[-1] < 100 and rs_mom.iloc[-1] > 100 else "LAGGING" if rs_ratio.iloc[-1] < 100 and rs_mom.iloc[-1] < 100 else "WEAKENING",
-            "RS-Ratio": round(rs_ratio.iloc[-1], 2), "Momentum": round(rs_mom.iloc[-1], 2)
+            "Quadrant": quad, "RS-Ratio": round(r_val, 2), "Momentum": round(m_val, 2)
         })
 
-        # Smooth Tail
         rt = pd.DataFrame({'x': rs_ratio, 'y': rs_mom}).dropna().tail(tail_len)
         if len(rt) > 3:
             tr = np.arange(len(rt)); ts = np.linspace(0, len(rt)-1, len(rt)*5)
             rrg_dict[t] = pd.DataFrame({'x': interp1d(tr, rt['x'], kind='cubic')(ts), 'y': interp1d(tr, rt['y'], kind='cubic')(ts)})
 
-    # Layout: Chart and Table
-    col1, col2 = st.columns([2, 1])
+    # Layout: Larger Chart
+    col1, col2 = st.columns([2.5, 1])
 
     with col1:
         fig = go.Figure()
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="black", width=2))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="black", width=2))
         
-        vis = True if show_all else "legendonly"
+        # Visibility logic for legend toggle
+        vis_state = True if show_all else "legendonly"
+        
         for i, (t, df) in enumerate(rrg_dict.items()):
             color = px.colors.qualitative.Plotly[i % 10]
-            fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='lines', name=t, line=dict(width=3, color=color), visible=vis))
-            fig.add_annotation(x=df['x'].iloc[-1], y=df['y'].iloc[-1], ax=df['x'].iloc[-2], ay=df['y'].iloc[-2], showarrow=True, arrowhead=2, arrowcolor=color, text=f"<b> {t} </b>", bgcolor=color, font=dict(color="white"), yshift=15)
+            # Mode set to lines only for the snake, markers for the arrow
+            fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='lines', name=t, 
+                                     line=dict(width=4, color=color), visible=vis_state))
+            
+            # Arrow/Label visibility tied to the snake line
+            fig.add_annotation(x=df['x'].iloc[-1], y=df['y'].iloc[-1], ax=df['x'].iloc[-2], ay=df['y'].iloc[-2],
+                               showarrow=True, arrowhead=2, arrowcolor=color, text=f"<b> {t} </b>", 
+                               bgcolor=color, font=dict(color="white"), yshift=15, visible=show_all)
         
-        fig.update_layout(height=700, template="plotly_white", xaxis=dict(range=[95, 105]), yaxis=dict(range=[95, 105]))
+        # Chart Size increase
+        fig.update_layout(height=850, width=850, template="plotly_white", 
+                          xaxis=dict(range=[95, 105]), yaxis=dict(range=[95, 105]),
+                          legend=dict(itemclick="toggle", itemdoubleclick="toggleothers"))
         st.plotly_chart(fig, use_container_width=True)
 
     with col2:
         st.subheader("Leaderboard")
-        rank_df = pd.DataFrame(table_data).sort_values(by="RS-Ratio", ascending=False)
-        st.dataframe(rank_df, height=650)
+        if table_rows:
+            rank_df = pd.DataFrame(table_rows).sort_values(by="RS-Ratio", ascending=False)
+            st.dataframe(rank_df, height=750)
 
-    # --- NEW: THE RELATIVE STRENGTH LINE CHART ---
+    # --- THE RELATIVE STRENGTH LINE CHART ---
     st.markdown("---")
     st.subheader("📈 Long-Term Relative Strength Trend")
     selected_stock = st.selectbox("Select a stock to view its RS Line vs Benchmark:", t_list)
     
     if selected_stock:
-        # RS Line = (Stock / Benchmark) indexed to 100 at the start of the period
         rs_line = (data[selected_stock] / data[bench_ticker])
         rs_line = (rs_line / rs_line.iloc[0]) * 100
-        
-        fig_rs = px.line(rs_line, title=f"{selected_stock} vs {bench_ticker} (Indexed to 100)", labels={"value": "Relative Strength", "Date": "Date"})
+        fig_rs = px.line(rs_line, title=f"{selected_stock} vs {bench_ticker} (Indexed to 100)")
         fig_rs.add_hline(y=100, line_dash="dash", line_color="red")
-        fig_rs.update_layout(template="plotly_white", height=400)
+        fig_rs.update_layout(template="plotly_white", height=500)
         st.plotly_chart(fig_rs, use_container_width=True)
 
 except Exception as e:
-    st.error(f"Wait... Error: {e}")
+    st.error(f"Waiting for inputs... Error: {e}")
