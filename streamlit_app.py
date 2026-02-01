@@ -71,7 +71,7 @@ def run_analysis(ticker_str, bench):
 
 try:
     df_main, history_data = run_analysis(tickers_input, benchmark)
-    st.subheader(f"🌀 {timeframe} Rotation (Hover markers for Date/Quadrant)")
+    st.subheader(f"🌀 {timeframe} Rotation (Large dots = Historic Data Points)")
     fig = go.Figure()
     fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.1)", layer="below", line_width=0)
     fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="gray", width=1, dash="dash"))
@@ -84,27 +84,27 @@ try:
         df_p['quad'] = df_p.apply(lambda row: get_quadrant(row['x'], row['y']), axis=1)
         df_p['date_str'] = df_p['date'].dt.strftime('%b %d, %Y')
 
-        # TRAIL WITH MARKERS
+        # TRAIL WITH ENLARGED MARKERS
         if tail_len > 1:
             fig.add_trace(go.Scatter(
                 x=df_p['x'], y=df_p['y'], mode='lines+markers', name=t,
-                line=dict(color=color, width=1.5, shape='spline'),
-                marker=dict(size=5, opacity=0.6),
+                line=dict(color=color, width=2, shape='spline'),
+                marker=dict(size=8, opacity=0.7, line=dict(width=1, color='white')), # INCREASED SIZE HERE
                 customdata=np.stack((df_p['date_str'], df_p['quad']), axis=-1),
                 hovertemplate="<b>" + t + "</b><br>Date: %{customdata[0]}<br>Quad: %{customdata[1]}<extra></extra>",
-                opacity=0.4, legendgroup=t
+                opacity=0.5, legendgroup=t
             ))
         
-        # HEAD DIAMOND
+        # HEAD DIAMOND (Always Largest)
         fig.add_trace(go.Scatter(
             x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text',
-            marker=dict(symbol='diamond', size=13, color=color, line=dict(width=1, color='white')),
+            marker=dict(symbol='diamond', size=16, color=color, line=dict(width=2, color='white')),
             text=[t], textposition="top center", showlegend=(tail_len == 1), legendgroup=t,
             customdata=[[df_p['date_str'].iloc[-1], df_p['quad'].iloc[-1]]],
             hovertemplate="<b>" + t + "</b> (Current)<br>Date: %{customdata[0]}<br>Quad: %{customdata[1]}<extra></extra>"
         ))
 
-    fig.update_layout(template="plotly_white", height=750, xaxis=dict(range=[98, 102.5]), yaxis=dict(range=[98, 102.5]))
+    fig.update_layout(template="plotly_white", height=750, xaxis=dict(range=[98, 102.5], title="RS-Ratio"), yaxis=dict(range=[98, 102.5], title="RS-Momentum"))
     st.plotly_chart(fig, use_container_width=True)
 
     # GRID
