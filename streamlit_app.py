@@ -18,7 +18,6 @@ with st.sidebar:
     st.header("🎯 Watchlist")
     heap_type = st.radio("Choose Group:", ["Master Themes", "Startup", "ASX Blue Chips", "My Miners"])
     
-    # Auto-detect logic
     if heap_type == "Master Themes": current_list, auto_bench = MASTER_THEMES, "SPY"
     elif heap_type == "Startup": current_list, auto_bench = STARTUP_THEMES, "SPY"
     elif heap_type == "ASX Blue Chips": current_list, auto_bench = ASX_LIST, "VAS.AX"
@@ -29,14 +28,8 @@ with st.sidebar:
     
     st.markdown("---")
     st.header("⚖️ Benchmark")
-    bench_preset = st.selectbox("Preset Benchmarks:", ["Auto-Detect", "SPY (S&P 500)", "VAS.AX (ASX 200)", "QQQ (Nasdaq 100)", "NDQ.AX (ASX Nasdaq)"])
-    
-    # Benchmark Selector
-    if bench_preset == "Auto-Detect": final_bench = auto_bench
-    elif "SPY" in bench_preset: final_bench = "SPY"
-    elif "VAS.AX" in bench_preset: final_bench = "VAS.AX"
-    elif "QQQ" in bench_preset: final_bench = "QQQ"
-    else: final_bench = "NDQ.AX"
+    bench_preset = st.selectbox("Preset Benchmarks:", ["Auto-Detect", "SPY (S&P 500)", "VAS.AX (ASX 200)", "QQQ (Nasdaq 100)"])
+    final_bench = auto_bench if bench_preset == "Auto-Detect" else bench_preset.split(" ")[0]
     
     benchmark = st.text_input("Active Benchmark:", value=final_bench)
     st.markdown("---")
@@ -70,7 +63,8 @@ def get_quadrant(x, y):
 @st.cache_data(ttl=3600)
 def run_analysis(ticker_str, bench):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
-    all_list = list(set(tickers + [bench.strip().upper()]))
+    bench_ticker = bench.strip().upper()
+    all_list = list(set(tickers + [bench_ticker]))
     data = yf.download(all_list, period="2y", interval="1d", group_by='ticker', progress=False)
     w_data = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
     history, table_data = {"Daily": {}, "Weekly": {}}, []
@@ -96,24 +90,29 @@ try:
     fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.15)", layer="below", line_width=0)
     fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="gray", width=1, dash="dash"))
     fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="gray", width=1, dash="dash"))
-    for i, (t, df) in enumerate(history_data[timeframe].items()):
+    
+    for t, df in history_data[timeframe].items():
         if filter_setups and t not in df_main[df_main['Sync Status'] != "DIVERGED"]['Ticker'].values: continue
-        color = px.colors.qualitative.Plotly[i % 10]
         df_p = df.tail(tail_len).copy()
         df_p['q'] = df_p.apply(lambda r: get_quadrant(r['x'], r['y']), axis=1)
         df_p['d'] = df_p['date'].dt.strftime('%b %d')
-        if tail_len > 1:
-            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines+markers', name=t, line=dict(color=color, width=2, shape='spline'), marker=dict(size=8, opacity=0.7), customdata=np.stack((df_p['d'], df_p['q']), axis=-1), hovertemplate="<b>"+t+"</b><br>Date: %{customdata[0]}<br>Quad: %{customdata[1]}<extra></extra>", opacity=0.4, legendgroup=t))
-        fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=16, color=color, line=dict(width=2, color='white')), text=[t], textposition="top center", showlegend=(tail_len == 1), legendgroup=t))
-    fig.update_layout(template="plotly_white", height=750, xaxis=dict(range=[98, 102.5]), yaxis=dict(range=[98, 102.5]))
+        fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines+markers', name=t, line=dict(width=2, shape='spline'), marker=dict(size=8), customdata=np.stack((df_p['d'], df_p['q']), axis=-1), hovertemplate="<b>"+t+"</b><br>Date: %{customdata[0]}<extra></extra>", opacity=0.4))
+        fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=16), text=[t], textposition="top center", showlegend=False))
+    
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("📊 Alpha Grid")
-    def style_sync(val):
-        colors = {"POWER WALK": "#9B59B6", "LEAD-THROUGH": "#E67E22", "BULLISH SYNC": "#2ECC71", "DAILY PIVOT": "#F1C40F"}
-        return f'background-color: {colors.get(val, "#FBFCFC")}; color: {"white" if val in ["POWER WALK", "LEAD-THROUGH"] else "black"}; font-weight: bold'
-    df_disp = df_main.sort_values(by=['RS-Ratio'], ascending=False)
-    if filter_setups: df_disp = df_disp[df_disp['Sync Status'] != "DIVERGED"]
-    st.dataframe(df_disp.style.map(style_sync, subset=['Sync Status']).format({"Rel Vol": "{:.2f}x"}), use_container_width=True)
+    # SAFETY CHECK FOR COLUMN
+    if not df_main.empty and "RS-Ratio" in df_main.columns:
+        st.subheader("📊 Alpha Grid")
+        def style_sync(val):
+            colors = {"POWER WALK": "#9B59B6", "LEAD-THROUGH": "#E67E22", "BULLISH SYNC": "#2ECC71", "DAILY PIVOT": "#F1C40F"}
+            return f'background-color: {colors.get(val, "#FBFCFC")}; color: {"white" if val in ["POWER WALK", "LEAD-THROUGH"] else "black"}; font-weight: bold'
+        
+        df_disp = df_main.sort_values(by=['RS-Ratio'], ascending=False)
+        if filter_setups: df_disp = df_disp[df_disp['Sync Status'] != "DIVERGED"]
+        st.dataframe(df_disp.style.map(style_sync, subset=['Sync Status']).format({"Rel Vol": "{:.2f}x"}), use_container_width=True)
+    else:
+        st.warning("No valid RS-Ratio data found for the current list and benchmark. Try a different benchmark (e.g., VAS.AX for Australian stocks).")
+
 except Exception as e:
     st.error(f"Error: {e}")
