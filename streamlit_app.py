@@ -13,15 +13,17 @@ TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
     "IJR": "Small Cap Core", "GLD": "Gold", "SLV": "Silver", "COPX": "Copper Miners", 
-    "XLE": "Energy Sector", "BTC-USD": "Bitcoin", "XLK": "Technology", "XLY": "Consumer Disc", 
-    "XLC": "Communication", "XBI": "Biotech", "XLF": "Financials", "XLI": "Industrials", 
-    "XLV": "Health Care", "XLP": "Consumer Staples", "XLU": "Utilities", "XLB": "Materials", 
-    "XLRE": "Real Estate", "PSCE": "Small Cap Energy", "PSCT": "Small Cap Tech",
-    "AROC": "Archrock", "KGS": "Kodiak Gas", "LBRT": "Liberty Energy", "NE": "Noble Corp", "LEU": "Centrus Energy"
+    "XLE": "Energy Sector", "IBIT": "iShares Bitcoin Trust", "XLK": "Technology", 
+    "XLY": "Consumer Disc", "XLC": "Communication", "XBI": "Biotech", "XLF": "Financials", 
+    "XLI": "Industrials", "XLV": "Health Care", "XLP": "Consumer Staples", "XLU": "Utilities", 
+    "XLB": "Materials", "XLRE": "Real Estate", "PSCE": "Small Cap Energy", 
+    "PSCT": "Small Cap Tech", "AROC": "Archrock", "KGS": "Kodiak Gas", "LBRT": "Liberty Energy", 
+    "NE": "Noble Corp", "OII": "Oceaneering Intl"
 }
 
 # --- LISTS ---
-MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, BTC-USD"
+# Replaced BTC-USD with IBIT for cleaner data alignment
+MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT"
 SECTOR_ROTATION = "XLK, XLY, XLC, XBI, XLF, XLI, XLE, XLV, XLP, XLU, XLB, XLRE"
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
 STARTUP_THEMES = "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
@@ -36,7 +38,7 @@ with st.sidebar:
     elif heap_type == "Energy Torque": current_list, auto_bench = ENERGY_TORQUE, "XLE"
     elif heap_type == "Startup": current_list, auto_bench = STARTUP_THEMES, "SPY"
     
-    tickers_input = st.text_area("Ticker Heap:", value=current_list, height=150).replace("BTC", "BTC-USD")
+    tickers_input = st.text_area("Ticker Heap:", value=current_list, height=150)
     benchmark = st.text_input("Active Benchmark:", value=auto_bench)
     
     st.markdown("---")
@@ -47,18 +49,30 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- ENGINE ---
+# --- HARDENED ENGINE ---
 def get_metrics(df_raw, ticker, b_ticker, is_weekly):
     try:
-        px, bx = df_raw[ticker]['Close'].dropna(), df_raw[b_ticker]['Close'].dropna()
+        # 1. Access Data Safely
+        px_raw = df_raw[ticker]['Close']
+        bx_raw = df_raw[b_ticker]['Close']
+        
+        # 2. Drop NaNs and Intersect (The "IBIT Fix")
+        px = px_raw.dropna()
+        bx = bx_raw.dropna()
         common = px.index.intersection(bx.index)
-        if len(common) < 20: return None
-        rel = (px.loc[common] / bx.loc[common]) * 100
+        
+        if len(common) < 30: return None
+        
+        px_aligned = px.loc[common]
+        bx_aligned = bx.loc[common]
+        
+        # 3. Calculate RRG Values
+        rel = (px_aligned / bx_aligned) * 100
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
+        
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
-        # Format date for hover
         df_res['date_str'] = df_res['date'].dt.strftime('%b %d, %Y')
         return df_res
     except: return None
@@ -74,6 +88,8 @@ def run_analysis(ticker_str, bench):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
     bench_ticker = bench.strip().upper()
     all_list = list(set(tickers + [bench_ticker]))
+    
+    # Download data with 2y history
     data = yf.download(all_list, period="2y", interval="1d", group_by='ticker', progress=False)
     w_data = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
     
@@ -99,24 +115,29 @@ try:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
         
+        # Quadrant Design & 100-100 Crosshair
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.12)", layer="below", line_width=0)
 
+        # Labels (Pushed out to corners)
         for label, x, y, col in [("LEADING", 102.3, 102.3, "green"), ("IMPROVING", 97.7, 102.3, "blue"), ("LAGGING", 97.7, 97.7, "red"), ("WEAKENING", 102.3, 97.7, "orange")]:
             fig.add_annotation(x=x, y=y, text=f"<b>{label}</b>", showarrow=False, font=dict(color=col, size=14), opacity=0.4)
 
         for i, (t, df) in enumerate(history_data[timeframe].items()):
             color = px.colors.qualitative.Alphabet[i % 26]
             full_name = TICKER_NAMES.get(t, t)
-            df_p = df.iloc[-min(tail_len, len(df)):]
             
-            # Tail with Date Hover
+            # Robust Slicing
+            avail_len = len(df)
+            actual_points = min(tail_len, avail_len)
+            df_p = df.iloc[-actual_points:]
+            
+            # Solid Tail with Visible Markers & Date Hover
             fig.add_trace(go.Scatter(
-                x=df_p['x'], y=df_p['y'], 
-                mode='lines+markers',
+                x=df_p['x'], y=df_p['y'], mode='lines+markers',
                 line=dict(color=color, width=3, shape='spline'),
-                marker=dict(size=6, color=color, opacity=0.7, line=dict(width=1, color='white')), 
+                marker=dict(size=6, color=color, opacity=0.8, line=dict(width=1, color='white')), 
                 name=f"{t} ({full_name})",
                 customdata=df_p['date_str'],
                 hovertemplate=f"<b>{t} | {full_name}</b><br>Date: %{{customdata}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>",
@@ -131,11 +152,12 @@ try:
                 hovertemplate=f"<b>{t} | %{{customdata[0]}}</b><br>LATEST: %{{customdata[1]}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
             
         fig.update_layout(template="plotly_white", height=850, 
-                          xaxis=dict(range=[97.5, 102.5], title="RS-Ratio"),
-                          yaxis=dict(range=[97.5, 102.5], title="RS-Momentum"),
+                          xaxis=dict(range=[97.5, 102.5], title="RS-Ratio (Trend)"),
+                          yaxis=dict(range=[97.5, 102.5], title="RS-Momentum (Energy)"),
                           legend=dict(orientation="h", y=-0.12, xanchor="center", x=0.5))
         st.plotly_chart(fig, use_container_width=True)
 
+        # Alpha Grid Shading
         st.subheader("📊 Alpha Grid")
         def style_status(val):
             color_map = {"POWER WALK": "background-color: #9B59B6; color: white;", "LEAD-THROUGH": "background-color: #E67E22; color: white;",
@@ -144,4 +166,4 @@ try:
 
         st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False).style.applymap(style_status, subset=['Sync Status']), use_container_width=True)
 except Exception as e:
-    st.error(f"Engine Alert: {e}")
+    st.error(f"Engine Alert: {e}. Check if a ticker has enough historical data.")
