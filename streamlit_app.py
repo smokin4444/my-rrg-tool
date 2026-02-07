@@ -1,154 +1,161 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import numpy as np
-import yfinance as yf
 import plotly.graph_objects as go
-from datetime import datetime
+import plotly.express as px
 
-# --- 1. CONFIGURATION & PRESETS ---
-st.set_page_config(page_title="Alpha RRG Scanner", layout="wide")
+# --- CONFIG ---
+st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
-RRG_PRESETS = {
-    "Major Themes": {
-        "benchmark": "SPY",
-        "tickers": ["SPY", "QQQ", "DIA", "MAGS", "IWM", "IJR", "GLD", "SLV", "COPX", "XLE", "BTC-USD"],
-        "description": "Broad market vs. Small-Cap Quality & Hard Assets"
-    },
-    "Sector Rotation": {
-        "benchmark": "SPY",
-        "tickers": ["XLK", "XLY", "XLC", "XBI", "XLF", "XLI", "XLE", "XLV", "XLP", "XLU", "XLB", "XLRE"],
-        "description": "Institutional flow across S&P 500 sectors"
-    }
-}
+# --- LISTS ---
+MASTER_THEMES = "SOXX, IGV, XLP, MAGS, URA, COPX, GDXJ, SILJ, IBIT, ITA, POWR, XME, XLC, XLY, XLE, XLF, XLV, XLI, XLB, XLRE, XLK, XLU"
+STARTUP_THEMES = "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
+ASX_LIST = "CBA.AX, BHP.AX, CSL.AX, NAB.AX, WBC.AX, ANZ.AX, MQG.AX, WES.AX, TLS.AX, WOW.AX, FMG.AX, RIO.AX, GMG.AX, TCL.AX, ALL.AX"
+MINERS = "AFM.V, NAK, A4N.AX, CSC.AX, IVN.TO, TGB, MU, APLD"
 
-# --- 2. SIDEBAR UI ---
-st.sidebar.header("Scanner Settings")
-group_choice = st.sidebar.selectbox("Select Preset Group", list(RRG_PRESETS.keys()))
-selected_group = RRG_PRESETS[group_choice]
-
-benchmark_ticker = st.sidebar.text_input("Benchmark", value=selected_group["benchmark"])
-tickers_input = st.sidebar.text_area("Tickers", value=", ".join(selected_group["tickers"]))
-ticker_list = [t.strip() for t in tickers_input.split(",")]
-
-window_ratio = st.sidebar.slider("RS-Ratio Window", 5, 30, 14)
-window_mom = st.sidebar.slider("RS-Mom Window", 5, 30, 14)
-tail_length = st.sidebar.slider("Tail Length", 1, 20, 10)
-
-# --- 3. DATA & CALCULATIONS ---
-@st.cache_data(ttl=3600)
-def get_rrg_data(tickers, benchmark):
-    all_symbols = list(set(tickers + [benchmark]))
-    # Added auto_adjust=True to handle yfinance parsing issues
-    data = yf.download(all_symbols, period="1y", auto_adjust=True)
+# --- SIDEBAR ---
+with st.sidebar:
+    st.header("🎯 Watchlist")
+    heap_type = st.radio("Choose Group:", ["Master Themes", "Startup", "ASX Blue Chips", "My Miners"])
     
-    if data.empty:
-        st.error("No data returned from Yahoo Finance. Check ticker symbols or connection.")
-        return pd.DataFrame(), pd.DataFrame()
+    if heap_type == "Master Themes": current_list, auto_bench = MASTER_THEMES, "SPY"
+    elif heap_type == "Startup": current_list, auto_bench = STARTUP_THEMES, "SPY"
+    elif heap_type == "ASX Blue Chips": current_list, auto_bench = ASX_LIST, "VAS.AX"
+    elif heap_type == "My Miners": current_list, auto_bench = MINERS, "SPY"
+    
+    tickers_input = st.text_area("Ticker Heap:", value=current_list, height=150).replace("HG1!", "HG=F")
+    
+    st.header("⚖️ Benchmark")
+    bench_preset = st.selectbox("Preset:", ["Auto-Detect", "SPY (S&P 500)", "VAS.AX (ASX 200)", "QQQ (Nasdaq)"])
+    final_bench = auto_bench if bench_preset == "Auto-Detect" else bench_preset.split(" ")[0]
+    benchmark = st.text_input("Active Benchmark:", value=final_bench)
+    
+    st.markdown("---")
+    timeframe = st.radio("Timeframe:", ["Daily", "Weekly"])
+    tail_len = st.slider("Tail Length:", 1, 30, 10)
+    filter_setups = st.checkbox("Top Setups Only", value=True)
+    
+    if st.button("♻️ Reset Engine"):
+        st.cache_data.clear()
+        st.rerun()
 
-    # Handle multi-index columns if necessary
-    close_data = data['Close'] if 'Close' in data else data
-    
-    rs_ratio_df = pd.DataFrame()
-    rs_mom_df = pd.DataFrame()
-    
-    if benchmark not in close_data.columns:
-        st.error(f"Benchmark {benchmark} not found in data.")
-        return pd.DataFrame(), pd.DataFrame()
+# --- HARDENED ENGINE ---
+def get_rrg_metrics(df_raw, ticker, b_ticker, is_weekly=False):
+    try:
+        if ticker not in df_raw.columns.get_level_values(0): return None
         
-    bench_series = close_data[benchmark]
+        px = df_raw[ticker]['Close'].dropna()
+        bx = df_raw[b_ticker]['Close'].dropna()
+        common = px.index.intersection(bx.index)
+        
+        # Hard check for minimum data length (need at least 28 for rolling 14 + lookback)
+        if len(common) < 30: return None
+        
+        rel = (px.loc[common] / bx.loc[common]) * 100
+        ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
+        roc = ratio.diff(1)
+        mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
+        
+        df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
+        
+        # Another safety check after dropna()
+        if len(df_res) < 5: return None
+        
+        if is_weekly:
+            df_res['date'] = df_res['date'] + pd.Timedelta(days=4)
+        
+        # Use .iloc[-1] and .iloc[-5] safely
+        ch = np.sqrt((df_res['x'].iloc[-1] - df_res['x'].iloc[-5])**2 + (df_res['y'].iloc[-1] - df_res['y'].iloc[-5])**2)
+        
+        vol_data = df_raw[ticker].get('Volume', None)
+        rv = (vol_data.iloc[-1] / vol_data.tail(20).mean()) if vol_data is not None and not vol_data.empty else 1.0
+        
+        return df_res, round(ch, 2), rv
+    except Exception:
+        return None
+
+def get_quadrant(x, y):
+    if x >= 100 and y >= 100: return "LEADING"
+    if x < 100 and y >= 100: return "IMPROVING"
+    if x < 100 and y < 100: return "LAGGING"
+    return "WEAKENING"
+
+@st.cache_data(ttl=600)
+def run_analysis(ticker_str, bench):
+    tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
+    bench_ticker = bench.strip().upper()
+    all_list = list(set(tickers + [bench_ticker]))
+    
+    # Using standard download; no custom session to avoid library conflicts
+    data = yf.download(all_list, period="2y", interval="1d", group_by='ticker', progress=False)
+    w_data = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
+    
+    history, table_data = {"Daily": {}, "Weekly": {}}, []
     
     for t in tickers:
-        if t not in close_data.columns: continue
-        rs = (close_data[t] / bench_series) * 100
+        d_res = get_rrg_metrics(data, t, bench_ticker, False)
+        w_res = get_rrg_metrics(w_data, t, bench_ticker, True)
         
-        ratio = rs.rolling(window_ratio).mean()
-        norm_ratio = ((ratio - ratio.mean()) / ratio.std()) + 100
-        
-        mom = norm_ratio.diff(window_mom)
-        norm_mom = ((mom - mom.mean()) / mom.std()) + 100
-        
-        rs_ratio_df[t] = norm_ratio
-        rs_mom_df[t] = norm_mom
-        
-    return rs_ratio_df.tail(30), rs_mom_df.tail(30)
+        if d_res and w_res:
+            history["Daily"][t], history["Weekly"][t] = d_res[0], w_res[0]
+            dr, dm = d_res[0]['x'].iloc[-1], d_res[0]['y'].iloc[-1]
+            wr, wm = w_res[0]['x'].iloc[-1], w_res[0]['y'].iloc[-1]
+            dq, wq = get_quadrant(dr, dm), get_quadrant(wr, wm)
+            
+            status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
+                     "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
+                     "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
+                     "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
+            
+            table_data.append({
+                "Ticker": t, "Sync Status": status, "Daily Quad": dq, "Weekly Quad": wq,
+                "Daily CH": d_res[1], "RS-Ratio": round(dr, 2), "Rel Vol": d_res[2]
+            })
+            
+    return pd.DataFrame(table_data), history
 
-ratio_data, mom_data = get_rrg_data(ticker_list, benchmark_ticker)
-
-if not ratio_data.empty:
-    # --- 4. ALPHA GRID LOGIC ---
-    def get_sync_status(r, m, prev_r, prev_m):
-        if r > 100 and m > 100:
-            return "POWER WALK" if m > prev_m else "LEADING"
-        elif r > 100 and m < 100:
-            return "WEAKENING"
-        elif r < 100 and m < 100:
-            return "LAGGING"
-        else:
-            return "LEAD-THROUGH" if m > prev_m else "IMPROVING"
-
-    grid_data = []
-    for t in ratio_data.columns:
-        r, m = ratio_data[t].iloc[-1], mom_data[t].iloc[-1]
-        pr, pm = ratio_data[t].iloc[-2], mom_data[t].iloc[-2]
-        grid_data.append({
-            "Ticker": t,
-            "RS-Ratio": round(r, 2),
-            "RS-Mom": round(m, 2),
-            "Status": get_sync_status(r, m, pr, pm)
-        })
-
-    df_grid = pd.DataFrame(grid_data).sort_values(by="RS-Ratio", ascending=False)
-
-    # --- STYLE THE TABLE ---
-    def style_status(val):
-        color_map = {
-            "POWER WALK": "background-color: #00FF00; color: black; font-weight: bold",
-            "LEADING": "background-color: #CCFFCC; color: black",
-            "WEAKENING": "background-color: #FFFF99; color: black",
-            "LAGGING": "background-color: #FFCCCC; color: black",
-            "LEAD-THROUGH": "background-color: #99CCFF; color: black; font-weight: bold",
-            "IMPROVING": "background-color: #CCE5FF; color: black"
-        }
-        return color_map.get(val, "")
-
-    # --- 5. VISUALIZATION ---
-    st.subheader(f"Current Scanner: {group_choice}")
+# --- DISPLAY ---
+try:
+    df_main, history_data = run_analysis(tickers_input, benchmark)
     
-    # Chart on Top
-    fig = go.Figure()
+    if not df_main.empty:
+        st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
+        fig = go.Figure()
+        
+        # Power Zone / Green Room
+        fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.15)", layer="below", line_width=0)
+        fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="gray", width=1, dash="dash"))
+        fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="gray", width=1, dash="dash"))
+        
+        for i, (t, df) in enumerate(history_data[timeframe].items()):
+            if filter_setups and t not in df_main[df_main['Sync Status'] != "DIVERGED"]['Ticker'].values: continue
+            
+            color = px.colors.qualitative.Plotly[i % 10]
+            df_p = df.tail(tail_len)
+            df_p['d_label'] = df_p['date'].dt.strftime('%b %d')
+            
+            if tail_len > 1:
+                fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines+markers', name=t, 
+                                         line=dict(color=color, shape='spline'), marker=dict(size=8), 
+                                         customdata=df_p['d_label'], hovertemplate="<b>"+t+"</b><br>Date: %{customdata}<extra></extra>",
+                                         opacity=0.4))
+            
+            fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', 
+                                     marker=dict(symbol='diamond', size=16, color=color, line=dict(width=2, color='white')), 
+                                     text=[t], textposition="top center", showlegend=False))
+            
+        fig.update_layout(template="plotly_white", height=750, xaxis=dict(range=[98, 102.5]), yaxis=dict(range=[98, 102.5]))
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.subheader("📊 Alpha Grid")
+        def style_sync(val):
+            colors = {"POWER WALK": "#9B59B6", "LEAD-THROUGH": "#E67E22", "BULLISH SYNC": "#2ECC71", "DAILY PIVOT": "#F1C40F"}
+            return f'background-color: {colors.get(val, "#FBFCFC")}; color: {"white" if val in ["POWER WALK", "LEAD-THROUGH"] else "black"}; font-weight: bold'
+        
+        st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False).style.map(style_sync, subset=['Sync Status']).format({"Rel Vol": "{:.2f}x"}), use_container_width=True)
+    else:
+        st.info("No tickers in this list have enough history (min 30 days) to calculate RRG metrics yet.")
 
-    # Universal Quadrant Shading
-    quads = [
-        (100, 100, 110, 110, "rgba(0,255,0,0.1)"),  # Leading
-        (100, 90, 110, 100, "rgba(255,255,0,0.1)"), # Weakening
-        (90, 90, 100, 100, "rgba(255,0,0,0.1)"),   # Lagging
-        (90, 100, 100, 110, "rgba(0,0,255,0.1)")   # Improving
-    ]
-
-    for x0, y0, x1, y1, color in quads:
-        fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1, fillcolor=color, line_width=0, layer="below")
-
-    fig.add_shape(type="line", x0=100, y0=90, x1=100, y1=110, line=dict(color="Black", width=1))
-    fig.add_shape(type="line", x0=90, y0=100, x1=110, y1=100, line=dict(color="Black", width=1))
-
-    for t in ratio_data.columns:
-        fig.add_trace(go.Scatter(
-            x=ratio_data[t].tail(tail_length), 
-            y=mom_data[t].tail(tail_length),
-            mode='lines+markers', name=t,
-            marker=dict(size=[2]*(tail_length-1) + [12], symbol="diamond")
-        ))
-
-    fig.update_layout(xaxis=dict(title="RS-Ratio", range=[97, 103]),
-                      yaxis=dict(title="RS-Momentum", range=[97, 103]),
-                      height=650, template="plotly_white", showlegend=True)
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Table BELOW Chart (for better visibility)
-    st.divider()
-    st.subheader("Alpha Grid Analysis")
-    st.dataframe(df_grid.style.applymap(style_status, subset=['Status']), use_container_width=True, hide_index=True)
-    
-else:
-    st.warning("Please verify your tickers in the sidebar.")
+except Exception as e:
+    st.error(f"Dashboard Error: {e}")
