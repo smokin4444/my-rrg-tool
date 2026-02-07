@@ -38,21 +38,32 @@ tail_length = st.sidebar.slider("Tail Length", 1, 20, 10)
 @st.cache_data(ttl=3600)
 def get_rrg_data(tickers, benchmark):
     all_symbols = list(set(tickers + [benchmark]))
-    data = yf.download(all_symbols, period="1y")['Close']
+    # Added auto_adjust=True to handle yfinance parsing issues
+    data = yf.download(all_symbols, period="1y", auto_adjust=True)
+    
+    if data.empty:
+        st.error("No data returned from Yahoo Finance. Check ticker symbols or connection.")
+        return pd.DataFrame(), pd.DataFrame()
+
+    # Handle multi-index columns if necessary
+    close_data = data['Close'] if 'Close' in data else data
     
     rs_ratio_df = pd.DataFrame()
     rs_mom_df = pd.DataFrame()
-    bench_series = data[benchmark]
+    
+    if benchmark not in close_data.columns:
+        st.error(f"Benchmark {benchmark} not found in data.")
+        return pd.DataFrame(), pd.DataFrame()
+        
+    bench_series = close_data[benchmark]
     
     for t in tickers:
-        if t not in data.columns: continue
-        rs = (data[t] / bench_series) * 100
+        if t not in close_data.columns: continue
+        rs = (close_data[t] / bench_series) * 100
         
-        # Normalized Ratio (Simplified JdK)
         ratio = rs.rolling(window_ratio).mean()
         norm_ratio = ((ratio - ratio.mean()) / ratio.std()) + 100
         
-        # Normalized Momentum
         mom = norm_ratio.diff(window_mom)
         norm_mom = ((mom - mom.mean()) / mom.std()) + 100
         
@@ -63,51 +74,62 @@ def get_rrg_data(tickers, benchmark):
 
 ratio_data, mom_data = get_rrg_data(ticker_list, benchmark_ticker)
 
-# --- 4. ALPHA GRID LOGIC ---
-def get_sync_status(r, m, prev_r, prev_m):
-    if r > 100 and m > 100:
-        return "POWER WALK" if m > prev_m else "LEADING"
-    elif r > 100 and m < 100:
-        return "WEAKENING"
-    elif r < 100 and m < 100:
-        return "LAGGING"
-    else:
-        return "LEAD-THROUGH" if m > prev_m else "IMPROVING"
+if not ratio_data.empty:
+    # --- 4. ALPHA GRID LOGIC ---
+    def get_sync_status(r, m, prev_r, prev_m):
+        if r > 100 and m > 100:
+            return "POWER WALK" if m > prev_m else "LEADING"
+        elif r > 100 and m < 100:
+            return "WEAKENING"
+        elif r < 100 and m < 100:
+            return "LAGGING"
+        else:
+            return "LEAD-THROUGH" if m > prev_m else "IMPROVING"
 
-grid_data = []
-for t in ratio_data.columns:
-    r, m = ratio_data[t].iloc[-1], mom_data[t].iloc[-1]
-    pr, pm = ratio_data[t].iloc[-2], mom_data[t].iloc[-2]
-    grid_data.append({
-        "Ticker": t,
-        "RS-Ratio": round(r, 2),
-        "RS-Mom": round(m, 2),
-        "Status": get_sync_status(r, m, pr, pm)
-    })
+    grid_data = []
+    for t in ratio_data.columns:
+        r, m = ratio_data[t].iloc[-1], mom_data[t].iloc[-1]
+        pr, pm = ratio_data[t].iloc[-2], mom_data[t].iloc[-2]
+        grid_data.append({
+            "Ticker": t,
+            "RS-Ratio": round(r, 2),
+            "RS-Mom": round(m, 2),
+            "Status": get_sync_status(r, m, pr, pm)
+        })
 
-df_grid = pd.DataFrame(grid_data).sort_values(by="RS-Ratio", ascending=False)
+    df_grid = pd.DataFrame(grid_data).sort_values(by="RS-Ratio", ascending=False)
 
-# --- 5. VISUALIZATION ---
-col1, col2 = st.columns([2, 1])
+    # --- STYLE THE TABLE ---
+    def style_status(val):
+        color_map = {
+            "POWER WALK": "background-color: #00FF00; color: black; font-weight: bold",
+            "LEADING": "background-color: #CCFFCC; color: black",
+            "WEAKENING": "background-color: #FFFF99; color: black",
+            "LAGGING": "background-color: #FFCCCC; color: black",
+            "LEAD-THROUGH": "background-color: #99CCFF; color: black; font-weight: bold",
+            "IMPROVING": "background-color: #CCE5FF; color: black"
+        }
+        return color_map.get(val, "")
 
-with col1:
+    # --- 5. VISUALIZATION ---
+    st.subheader(f"Current Scanner: {group_choice}")
+    
+    # Chart on Top
     fig = go.Figure()
 
-    # Universal Quadrant Shading using add_shape (Avoids AttributeError)
-    quadrants = [
-        dict(x0=100, y0=100, x1=110, y1=110, color="rgba(0,255,0,0.1)"),  # Leading
-        dict(x0=100, y0=90, x1=110, y1=100, color="rgba(255,255,0,0.1)"), # Weakening
-        dict(x0=90, y0=90, x1=100, y1=100, color="rgba(255,0,0,0.1)"),   # Lagging
-        dict(x0=90, y0=100, x1=100, y1=110, color="rgba(0,0,255,0.1)")   # Improving
+    # Universal Quadrant Shading
+    quads = [
+        (100, 100, 110, 110, "rgba(0,255,0,0.1)"),  # Leading
+        (100, 90, 110, 100, "rgba(255,255,0,0.1)"), # Weakening
+        (90, 90, 100, 100, "rgba(255,0,0,0.1)"),   # Lagging
+        (90, 100, 100, 110, "rgba(0,0,255,0.1)")   # Improving
     ]
 
-    for q in quadrants:
-        fig.add_shape(type="rect", x0=q["x0"], y0=q["y0"], x1=q["x1"], y1=q["y1"],
-                      fillcolor=q["color"], line_width=0, layer="below")
+    for x0, y0, x1, y1, color in quads:
+        fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1, fillcolor=color, line_width=0, layer="below")
 
-    # Draw Crosshairs
-    fig.add_shape(type="line", x0=100, y0=90, x1=100, y1=110, line=dict(color="Black", width=2))
-    fig.add_shape(type="line", x0=90, y0=100, x1=110, y1=100, line=dict(color="Black", width=2))
+    fig.add_shape(type="line", x0=100, y0=90, x1=100, y1=110, line=dict(color="Black", width=1))
+    fig.add_shape(type="line", x0=90, y0=100, x1=110, y1=100, line=dict(color="Black", width=1))
 
     for t in ratio_data.columns:
         fig.add_trace(go.Scatter(
@@ -117,12 +139,16 @@ with col1:
             marker=dict(size=[2]*(tail_length-1) + [12], symbol="diamond")
         ))
 
-    fig.update_layout(xaxis=dict(title="RS-Ratio", range=[96, 104]),
-                      yaxis=dict(title="RS-Momentum", range=[96, 104]),
-                      height=600, template="plotly_white")
+    fig.update_layout(xaxis=dict(title="RS-Ratio", range=[97, 103]),
+                      yaxis=dict(title="RS-Momentum", range=[97, 103]),
+                      height=650, template="plotly_white", showlegend=True)
+    
     st.plotly_chart(fig, use_container_width=True)
 
-with col2:
-    st.subheader("Alpha Grid")
-    st.dataframe(df_grid, use_container_width=True, hide_index=True)
-    st.caption("Sorting: RS-Ratio (High to Low)")
+    # Table BELOW Chart (for better visibility)
+    st.divider()
+    st.subheader("Alpha Grid Analysis")
+    st.dataframe(df_grid.style.applymap(style_status, subset=['Status']), use_container_width=True, hide_index=True)
+    
+else:
+    st.warning("Please verify your tickers in the sidebar.")
