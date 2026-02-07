@@ -22,7 +22,6 @@ TICKER_NAMES = {
 }
 
 # --- LISTS ---
-# Replaced BTC-USD with IBIT for cleaner data alignment
 MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT"
 SECTOR_ROTATION = "XLK, XLY, XLC, XBI, XLF, XLI, XLE, XLV, XLP, XLU, XLB, XLRE"
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
@@ -53,15 +52,17 @@ with st.sidebar:
 def get_metrics(df_raw, ticker, b_ticker, is_weekly):
     try:
         # 1. Access Data Safely
+        if ticker not in df_raw.columns.get_level_values(0): return None
         px_raw = df_raw[ticker]['Close']
         bx_raw = df_raw[b_ticker]['Close']
         
-        # 2. Drop NaNs and Intersect (The "IBIT Fix")
+        # 2. Drop NaNs and Intersect
         px = px_raw.dropna()
         bx = bx_raw.dropna()
         common = px.index.intersection(bx.index)
         
-        if len(common) < 30: return None
+        # Guard: Need at least enough history for rolling windows (14) + a buffer
+        if len(common) < 25: return None
         
         px_aligned = px.loc[common]
         bx_aligned = bx.loc[common]
@@ -89,7 +90,6 @@ def run_analysis(ticker_str, bench):
     bench_ticker = bench.strip().upper()
     all_list = list(set(tickers + [bench_ticker]))
     
-    # Download data with 2y history
     data = yf.download(all_list, period="2y", interval="1d", group_by='ticker', progress=False)
     w_data = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
     
@@ -99,13 +99,15 @@ def run_analysis(ticker_str, bench):
         w_res = get_metrics(w_data, t, bench_ticker, True)
         if d_res is not None and w_res is not None:
             history["Daily"][t], history["Weekly"][t] = d_res, w_res
-            dr, dm = d_res['x'].iloc[-1], d_res['y'].iloc[-1]
-            dq, wq = get_quadrant(dr, dm), get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
-            status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
-                     "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
-                     "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
-                     "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
-            table_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Sync Status": status, "Daily Quad": dq, "Weekly Quad": wq, "Sync Radar": "✅ SYNCED" if dq == wq else "---", "RS-Ratio": round(dr, 2)})
+            # Final Safety Check for indexer
+            if not d_res.empty and not w_res.empty:
+                dr, dm = d_res['x'].iloc[-1], d_res['y'].iloc[-1]
+                dq, wq = get_quadrant(dr, dm), get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
+                status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
+                         "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
+                         "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
+                         "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
+                table_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Sync Status": status, "Daily Quad": dq, "Weekly Quad": wq, "Sync Radar": "✅ SYNCED" if dq == wq else "---", "RS-Ratio": round(dr, 2)})
     return pd.DataFrame(table_data), history
 
 # --- DISPLAY ---
@@ -120,7 +122,7 @@ try:
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.12)", layer="below", line_width=0)
 
-        # Labels (Pushed out to corners)
+        # Labels (Outer corners)
         for label, x, y, col in [("LEADING", 102.3, 102.3, "green"), ("IMPROVING", 97.7, 102.3, "blue"), ("LAGGING", 97.7, 97.7, "red"), ("WEAKENING", 102.3, 97.7, "orange")]:
             fig.add_annotation(x=x, y=y, text=f"<b>{label}</b>", showarrow=False, font=dict(color=col, size=14), opacity=0.4)
 
@@ -130,6 +132,8 @@ try:
             
             # Robust Slicing
             avail_len = len(df)
+            if avail_len < 2: continue # Skip tickers with zero or one data point
+            
             actual_points = min(tail_len, avail_len)
             df_p = df.iloc[-actual_points:]
             
@@ -143,7 +147,7 @@ try:
                 hovertemplate=f"<b>{t} | {full_name}</b><br>Date: %{{customdata}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>",
                 showlegend=True))
             
-            # Head Diamond
+            # Head Diamond (Using -1 safely)
             fig.add_trace(go.Scatter(
                 x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', 
                 marker=dict(symbol='diamond', size=18, color=color, line=dict(width=2, color='white')), 
@@ -166,4 +170,4 @@ try:
 
         st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False).style.applymap(style_status, subset=['Sync Status']), use_container_width=True)
 except Exception as e:
-    st.error(f"Engine Alert: {e}. Check if a ticker has enough historical data.")
+    st.error(f"Engine Alert: {e}. One of your tickers likely has empty data. Try hitting 'Reset Engine' or adjusting Tail Length.")
