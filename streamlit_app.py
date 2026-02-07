@@ -50,26 +50,22 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- HARDENED ENGINE ---
+# --- ENGINE ---
 def get_rrg_metrics(df_raw, ticker, b_ticker, is_weekly=False):
     try:
         if ticker not in df_raw.columns.get_level_values(0): return None
         px, bx = df_raw[ticker]['Close'].dropna(), df_raw[b_ticker]['Close'].dropna()
         common = px.index.intersection(bx.index)
-        
-        # Requirement: At least 30 days of data
         if len(common) < 30: return None
         
         rel = (px.loc[common] / bx.loc[common]) * 100
-        # Rolling stats require valid windows
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
         
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         if is_weekly: df_res['date'] = df_res['date'] + pd.Timedelta(days=4)
-        
-        return df_res if not df_res.empty else None
+        return df_res
     except: return None
 
 @st.cache_data(ttl=600)
@@ -96,22 +92,29 @@ try:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
         
-        # Quadrant Annotations
+        # 1. Restoration of Quadrant Crosshair (100-100)
+        fig.add_shape(type="line", x0=100, y0=80, x1=100, y1=120, line=dict(color="rgba(0,0,0,0.4)", width=2, dash="dot"))
+        fig.add_shape(type="line", x0=80, y0=100, x1=120, y1=100, line=dict(color="rgba(0,0,0,0.4)", width=2, dash="dot"))
+
+        # 2. Quadrant Shading & Annotations
+        fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.15)", layer="below", line_width=0)
         fig.add_annotation(x=102, y=102, text="<b>LEADING</b>", showarrow=False, font=dict(color="rgba(0,100,0,0.3)", size=14))
         fig.add_annotation(x=98, y=102, text="<b>IMPROVING</b>", showarrow=False, font=dict(color="rgba(0,0,100,0.3)", size=14))
         fig.add_annotation(x=98, y=98, text="<b>LAGGING</b>", showarrow=False, font=dict(color="rgba(100,0,0,0.3)", size=14))
         fig.add_annotation(x=102, y=98, text="<b>WEAKENING</b>", showarrow=False, font=dict(color="rgba(100,50,0,0.3)", size=14))
 
+        # 3. Comet Trails & Hover Names
         for i, (t, df) in enumerate(history_data[timeframe].items()):
             color = px.colors.qualitative.Alphabet[i % 26]
-            # Robust Slicing: Ensure we don't exceed existing data points
+            full_name = TICKER_NAMES.get(t, t)
+            
             avail_len = len(df)
             actual_tail = min(tail_len, avail_len)
-            if actual_tail < 2: continue # Skip if not enough points to draw a line
+            if actual_tail < 2: continue
             
             df_p = df.iloc[-actual_tail:]
             
-            # Draw faded tail segments safely
+            # Fading Tail Segments
             for j in range(len(df_p)-1):
                 opacity = (j + 1) / len(df_p) * 0.4
                 fig.add_trace(go.Scatter(
@@ -119,20 +122,19 @@ try:
                     mode='lines', line=dict(color=color, width=3, shape='spline'),
                     opacity=opacity, showlegend=False, hoverinfo='skip'))
             
-            # Head (Diamond)
+            # Head (Diamond) + Full Name Hover
             fig.add_trace(go.Scatter(
                 x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', 
                 marker=dict(symbol='diamond', size=15, color=color, line=dict(width=1.5, color='white')), 
                 text=[t], textposition="top center", name=f"{t}",
-                hovertemplate=f"<b>{t}</b><br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
+                customdata=[full_name],
+                hovertemplate=f"<b>{t} | %{{customdata}}</b><br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
             
         fig.update_layout(template="plotly_white", height=850, 
-                          xaxis=dict(range=[97.5, 102.5], title="RS-Ratio"),
-                          yaxis=dict(range=[97.5, 102.5], title="RS-Momentum"),
-                          legend=dict(orientation="h", y=-0.1))
+                          xaxis=dict(range=[97.5, 102.5], title="RS-Ratio (Trend)"),
+                          yaxis=dict(range=[97.5, 102.5], title="RS-Momentum (Energy)"),
+                          legend=dict(orientation="h", y=-0.1, xanchor="center", x=0.5))
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False), use_container_width=True)
-    else:
-        st.info("Wait for data sync. If it persists, try another watchlist group.")
 except Exception as e:
-    st.error(f"Engine Debug Alert: {e}. Check if a specific ticker in the input is causing the gap.")
+    st.error(f"Engine Debug Alert: {e}")
