@@ -50,21 +50,26 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- ENGINE ---
+# --- HARDENED ENGINE ---
 def get_rrg_metrics(df_raw, ticker, b_ticker, is_weekly=False):
     try:
         if ticker not in df_raw.columns.get_level_values(0): return None
         px, bx = df_raw[ticker]['Close'].dropna(), df_raw[b_ticker]['Close'].dropna()
         common = px.index.intersection(bx.index)
+        
+        # Requirement: At least 30 days of data
         if len(common) < 30: return None
         
         rel = (px.loc[common] / bx.loc[common]) * 100
+        # Rolling stats require valid windows
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
+        
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         if is_weekly: df_res['date'] = df_res['date'] + pd.Timedelta(days=4)
-        return df_res
+        
+        return df_res if not df_res.empty else None
     except: return None
 
 @st.cache_data(ttl=600)
@@ -91,25 +96,28 @@ try:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
         
-        # Quadrant Labels (Pushed to corners)
+        # Quadrant Annotations
         fig.add_annotation(x=102, y=102, text="<b>LEADING</b>", showarrow=False, font=dict(color="rgba(0,100,0,0.3)", size=14))
         fig.add_annotation(x=98, y=102, text="<b>IMPROVING</b>", showarrow=False, font=dict(color="rgba(0,0,100,0.3)", size=14))
         fig.add_annotation(x=98, y=98, text="<b>LAGGING</b>", showarrow=False, font=dict(color="rgba(100,0,0,0.3)", size=14))
         fig.add_annotation(x=102, y=98, text="<b>WEAKENING</b>", showarrow=False, font=dict(color="rgba(100,50,0,0.3)", size=14))
 
-        # Comet Trails with Bounds Protection
         for i, (t, df) in enumerate(history_data[timeframe].items()):
             color = px.colors.qualitative.Alphabet[i % 26]
-            df_p = df.tail(tail_len)
+            # Robust Slicing: Ensure we don't exceed existing data points
+            avail_len = len(df)
+            actual_tail = min(tail_len, avail_len)
+            if actual_tail < 2: continue # Skip if not enough points to draw a line
             
-            # Safeguard: Only draw tail if we have enough segments
-            if len(df_p) > 2:
-                for j in range(len(df_p)-1):
-                    opacity = (j + 1) / len(df_p) * 0.4
-                    fig.add_trace(go.Scatter(
-                        x=df_p['x'].iloc[j:j+2], y=df_p['y'].iloc[j:j+2], 
-                        mode='lines', line=dict(color=color, width=3, shape='spline'),
-                        opacity=opacity, showlegend=False, hoverinfo='skip'))
+            df_p = df.iloc[-actual_tail:]
+            
+            # Draw faded tail segments safely
+            for j in range(len(df_p)-1):
+                opacity = (j + 1) / len(df_p) * 0.4
+                fig.add_trace(go.Scatter(
+                    x=df_p['x'].iloc[j:j+2], y=df_p['y'].iloc[j:j+2], 
+                    mode='lines', line=dict(color=color, width=3, shape='spline'),
+                    opacity=opacity, showlegend=False, hoverinfo='skip'))
             
             # Head (Diamond)
             fig.add_trace(go.Scatter(
@@ -124,5 +132,7 @@ try:
                           legend=dict(orientation="h", y=-0.1))
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False), use_container_width=True)
+    else:
+        st.info("Wait for data sync. If it persists, try another watchlist group.")
 except Exception as e:
-    st.error(f"Engine Error: {e}. Please hit 'Reset Engine' in the sidebar.")
+    st.error(f"Engine Debug Alert: {e}. Check if a specific ticker in the input is causing the gap.")
