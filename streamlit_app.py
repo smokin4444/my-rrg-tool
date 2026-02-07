@@ -55,28 +55,6 @@ with st.sidebar:
         st.rerun()
 
 # --- ENGINE ---
-def get_rrg_metrics(df_raw, ticker, b_ticker, is_weekly=False):
-    try:
-        if ticker not in df_raw.columns.get_level_values(0): return None
-        px, bx = df_raw[ticker]['Close'].dropna(), df_raw[b_ticker]['Close'].dropna()
-        common = px.index.intersection(bx.index)
-        if len(common) < 30: return None
-        rel = (px.loc[common] / bx.loc[common]) * 100
-        ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
-        roc = ratio.diff(1)
-        mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
-        df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
-        if len(df_res) < 5: return None
-        if is_weekly: df_res['date'] = df_res['date'] + pd.Timedelta(days=4)
-        return df_res
-    except: return None
-
-def get_quadrant(x, y):
-    if x >= 100 and y >= 100: return "LEADING"
-    if x < 100 and y >= 100: return "IMPROVING"
-    if x < 100 and y < 100: return "LAGGING"
-    return "WEAKENING"
-
 @st.cache_data(ttl=600)
 def run_analysis(ticker_str, bench):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
@@ -84,16 +62,35 @@ def run_analysis(ticker_str, bench):
     all_list = list(set(tickers + [bench_ticker]))
     data = yf.download(all_list, period="2y", interval="1d", group_by='ticker', progress=False)
     w_data = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
+    
+    def get_metrics(df_raw, ticker, b_ticker, is_weekly):
+        try:
+            px, bx = df_raw[ticker]['Close'].dropna(), df_raw[b_ticker]['Close'].dropna()
+            common = px.index.intersection(bx.index)
+            rel = (px.loc[common] / bx.loc[common]) * 100
+            ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
+            roc = ratio.diff(1)
+            mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
+            df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
+            if is_weekly: df_res['date'] = df_res['date'] + pd.Timedelta(days=4)
+            return df_res
+        except: return None
+
     history, table_data = {"Daily": {}, "Weekly": {}}, []
     for t in tickers:
-        d_res = get_rrg_metrics(data, t, bench_ticker, False)
-        w_res = get_rrg_metrics(w_data, t, bench_ticker, True)
+        d_res = get_metrics(data, t, bench_ticker, False)
+        w_res = get_metrics(w_data, t, bench_ticker, True)
         if d_res is not None and w_res is not None:
             history["Daily"][t], history["Weekly"][t] = d_res, w_res
             dq, wq = get_quadrant(d_res['x'].iloc[-1], d_res['y'].iloc[-1]), get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
-            is_synced = "✅ SYNCED" if dq == wq else "---"
-            table_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Daily Quad": dq, "Weekly Quad": wq, "Sync Radar": is_synced, "RS-Ratio": round(d_res['x'].iloc[-1], 2)})
+            table_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Daily Quad": dq, "Weekly Quad": wq, "Sync Radar": "✅ SYNCED" if dq == wq else "---", "RS-Ratio": round(d_res['x'].iloc[-1], 2)})
     return pd.DataFrame(table_data), history
+
+def get_quadrant(x, y):
+    if x >= 100 and y >= 100: return "LEADING"
+    if x < 100 and y >= 100: return "IMPROVING"
+    if x < 100 and y < 100: return "LAGGING"
+    return "WEAKENING"
 
 # --- DISPLAY ---
 try:
@@ -102,54 +99,50 @@ try:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
         
-        # 1. Professional Background Colors & Shading
-        # Power Zone (Lead-through Shading)
+        # 1. Background Shading
         fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.15)", layer="below", line_width=0)
-        
-        # Quadrant Colors
-        fig.add_vrect(x0=100, x1=110, y0=100, y1=110, fillcolor="rgba(0, 255, 0, 0.03)", layer="below", line_width=0) # Leading
-        fig.add_vrect(x0=90, x1=100, y0=100, y1=110, fillcolor="rgba(0, 0, 255, 0.03)", layer="below", line_width=0) # Improving
-        fig.add_vrect(x0=90, x1=100, y0=90, y1=100, fillcolor="rgba(255, 0, 0, 0.03)", layer="below", line_width=0) # Lagging
-        fig.add_vrect(x0=100, x1=110, y0=90, y1=100, fillcolor="rgba(255, 165, 0, 0.03)", layer="below", line_width=0) # Weakening
+        fig.add_vrect(x0=100, x1=110, y0=100, y1=110, fillcolor="rgba(0, 255, 0, 0.02)", layer="below", line_width=0) 
+        fig.add_vrect(x0=90, x1=100, y0=100, y1=110, fillcolor="rgba(0, 0, 255, 0.02)", layer="below", line_width=0) 
+        fig.add_vrect(x0=90, x1=100, y0=90, y1=100, fillcolor="rgba(255, 0, 0, 0.02)", layer="below", line_width=0) 
+        fig.add_vrect(x0=100, x1=110, y0=90, y1=100, fillcolor="rgba(255, 165, 0, 0.02)", layer="below", line_width=0) 
 
-        # Quadrant Crosshair
+        # 2. Quadrant Labels (Pushed out to 101.8 / 98.2)
+        fig.add_annotation(x=101.8, y=101.8, text="<b>LEADING</b>", showarrow=False, font=dict(color="rgba(0,100,0,0.4)", size=12))
+        fig.add_annotation(x=98.2, y=101.8, text="<b>IMPROVING</b>", showarrow=False, font=dict(color="rgba(0,0,100,0.4)", size=12))
+        fig.add_annotation(x=98.2, y=98.2, text="<b>LAGGING</b>", showarrow=False, font=dict(color="rgba(100,0,0,0.4)", size=12))
+        fig.add_annotation(x=101.8, y=98.2, text="<b>WEAKENING</b>", showarrow=False, font=dict(color="rgba(100,50,0,0.4)", size=12))
+
         fig.add_shape(type="line", x0=100, y0=80, x1=100, y1=120, line=dict(color="rgba(0,0,0,0.2)", width=2, dash="dot"))
         fig.add_shape(type="line", x0=80, y0=100, x1=120, y1=100, line=dict(color="rgba(0,0,0,0.2)", width=2, dash="dot"))
 
-        # 2. Quadrant Labels (Small Professional Text)
-        fig.add_annotation(x=101, y=101.5, text="LEADING", showarrow=False, font=dict(color="green", size=10))
-        fig.add_annotation(x=99, y=101.5, text="IMPROVING", showarrow=False, font=dict(color="blue", size=10))
-        fig.add_annotation(x=99, y=98.5, text="LAGGING", showarrow=False, font=dict(color="red", size=10))
-        fig.add_annotation(x=101, y=98.5, text="WEAKENING", showarrow=False, font=dict(color="orange", size=10))
-
-        # 3. Plot Tickers with Spline Rounding
+        # 3. Fading Comet Tails
         for i, (t, df) in enumerate(history_data[timeframe].items()):
             color = px.colors.qualitative.Alphabet[i % 26]
-            full_name = TICKER_NAMES.get(t, t)
             df_p = df.tail(tail_len)
             
-            # Tail (Spline smoothed)
-            fig.add_trace(go.Scatter(
-                x=df_p['x'], y=df_p['y'], mode='lines', name=f"{t}", 
-                line=dict(color=color, width=3, shape='spline'), opacity=0.4, showlegend=True))
+            # Draw tail as individual segments to achieve fading
+            for j in range(len(df_p)-1):
+                opacity = (j + 1) / len(df_p) * 0.5
+                fig.add_trace(go.Scatter(
+                    x=df_p['x'].iloc[j:j+2], y=df_p['y'].iloc[j:j+2], 
+                    mode='lines', line=dict(color=color, width=3, shape='spline'),
+                    opacity=opacity, showlegend=False, hoverinfo='skip'))
             
             # Head (Diamond)
             fig.add_trace(go.Scatter(
                 x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', 
-                marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), 
-                text=[t], textposition="top center", showlegend=False,
-                hovertemplate=f"<b>{t} | {full_name}</b><br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
+                marker=dict(symbol='diamond', size=15, color=color, line=dict(width=1.5, color='white')), 
+                text=[t], textposition="top center", name=f"{t} ({TICKER_NAMES.get(t, t)})",
+                hovertemplate=f"<b>{t} | {TICKER_NAMES.get(t, t)}</b><br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
             
         fig.update_layout(
-            template="plotly_white", 
-            height=850, 
-            xaxis=dict(range=[98.2, 102], title="RS-Ratio (Trend)"),
-            yaxis=dict(range=[98.2, 102], title="RS-Momentum (Energy)"),
-            legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5),
+            template="plotly_white", height=850, 
+            xaxis=dict(range=[98, 102], title="RS-Ratio (Trend)"),
+            yaxis=dict(range=[98, 102], title="RS-Momentum (Energy)"),
+            legend=dict(orientation="h", yanchor="bottom", y=-0.12, xanchor="center", x=0.5),
             margin=dict(l=10, r=10, t=10, b=10)
         )
         st.plotly_chart(fig, use_container_width=True)
-
         st.subheader("📊 Alpha Grid")
         st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False), use_container_width=True)
 except Exception as e:
