@@ -50,20 +50,23 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- ENGINE ---
+# --- HARDENED ENGINE ---
 def get_rrg_metrics(df_raw, ticker, b_ticker, is_weekly=False):
     try:
         if ticker not in df_raw.columns.get_level_values(0): return None
-        px, bx = df_raw[ticker]['Close'].dropna(), df_raw[b_ticker]['Close'].dropna()
+        px = df_raw[ticker]['Close'].dropna()
+        bx = df_raw[b_ticker]['Close'].dropna()
         common = px.index.intersection(bx.index)
         if len(common) < 30: return None
+        
         rel = (px.loc[common] / bx.loc[common]) * 100
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
+        
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         if is_weekly: df_res['date'] = df_res['date'] + pd.Timedelta(days=4)
-        return df_res
+        return df_res if len(df_res) > 5 else None
     except: return None
 
 def get_quadrant(x, y):
@@ -86,8 +89,8 @@ def run_analysis(ticker_str, bench):
         w_res = get_rrg_metrics(w_data, t, bench_ticker, True)
         if d_res is not None and w_res is not None:
             history["Daily"][t], history["Weekly"][t] = d_res, w_res
-            dq, wq = get_quadrant(d_res['x'].iloc[-1], d_res['y'].iloc[-1]), get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
             dr, dm = d_res['x'].iloc[-1], d_res['y'].iloc[-1]
+            dq, wq = get_quadrant(dr, dm), get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
             status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
                      "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
                      "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
@@ -102,12 +105,12 @@ try:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
         
-        # 1. Background Logic & Quadrant Crosshair
+        # 1. Background Shading & Fixed Crosshair
         fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.15)", layer="below", line_width=0)
-        fig.add_shape(type="line", x0=100, y0=80, x1=100, y1=120, line=dict(color="rgba(0,0,0,0.4)", width=2, dash="dot"))
-        fig.add_shape(type="line", x0=80, y0=100, x1=120, y1=100, line=dict(color="rgba(0,0,0,0.4)", width=2, dash="dot"))
+        fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.4)", width=2, dash="dot"))
+        fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.4)", width=2, dash="dot"))
 
-        # 2. Quadrant Labels (Pushed out to extremes)
+        # 2. Pushed-Out Labels
         fig.add_annotation(x=102.3, y=102.3, text="<b>LEADING</b>", showarrow=False, font=dict(color="rgba(0,100,0,0.25)", size=16))
         fig.add_annotation(x=97.7, y=102.3, text="<b>IMPROVING</b>", showarrow=False, font=dict(color="rgba(0,0,100,0.25)", size=16))
         fig.add_annotation(x=97.7, y=97.7, text="<b>LAGGING</b>", showarrow=False, font=dict(color="rgba(100,0,0,0.25)", size=16))
@@ -117,12 +120,21 @@ try:
         for i, (t, df) in enumerate(history_data[timeframe].items()):
             color = px.colors.qualitative.Alphabet[i % 26]
             full_name = TICKER_NAMES.get(t, t)
-            df_p = df.iloc[-min(tail_len, len(df)):]
             
+            # SAFE SLICING
+            avail_len = len(df)
+            actual_tail = min(tail_len, avail_len)
+            if actual_tail < 2: continue
+            
+            df_p = df.iloc[-actual_tail:]
+            
+            # Fading Segments
             for j in range(len(df_p)-1):
-                opacity = (j + 1) / len(df_p) * 0.4
-                fig.add_trace(go.Scatter(x=df_p['x'].iloc[j:j+2], y=df_p['y'].iloc[j:j+2], mode='lines', 
-                                         line=dict(color=color, width=3, shape='spline'), opacity=opacity, showlegend=False, hoverinfo='skip'))
+                try:
+                    opacity = (j + 1) / len(df_p) * 0.4
+                    fig.add_trace(go.Scatter(x=df_p['x'].iloc[j:j+2], y=df_p['y'].iloc[j:j+2], mode='lines', 
+                                             line=dict(color=color, width=3, shape='spline'), opacity=opacity, showlegend=False, hoverinfo='skip'))
+                except: continue # Skip broken segments
             
             fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', 
                                      marker=dict(symbol='diamond', size=15, color=color, line=dict(width=1.5, color='white')), 
@@ -133,19 +145,14 @@ try:
                           yaxis=dict(range=[97.5, 102.5], title="RS-Momentum (Energy)"), legend=dict(orientation="h", y=-0.12, xanchor="center", x=0.5))
         st.plotly_chart(fig, use_container_width=True)
 
-        # 4. Alpha Grid with Shaded Status Areas
+        # 4. Styled Table
         st.subheader("📊 Alpha Grid")
         def style_status(val):
-            color_map = {
-                "POWER WALK": "background-color: #9B59B6; color: white; font-weight: bold;",   # Purple
-                "LEAD-THROUGH": "background-color: #E67E22; color: white; font-weight: bold;", # Orange
-                "BULLISH SYNC": "background-color: #2ECC71; color: white; font-weight: bold;", # Green
-                "DAILY PIVOT": "background-color: #F1C40F; color: black; font-weight: bold;"    # Yellow
-            }
+            color_map = {"POWER WALK": "background-color: #9B59B6; color: white;", "LEAD-THROUGH": "background-color: #E67E22; color: white;",
+                         "BULLISH SYNC": "background-color: #2ECC71; color: white;", "DAILY PIVOT": "background-color: #F1C40F; color: black;"}
             return color_map.get(val, "")
 
-        df_styled = df_main.sort_values(by='RS-Ratio', ascending=False)
-        st.dataframe(df_styled.style.applymap(style_status, subset=['Sync Status']), use_container_width=True)
+        st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False).style.applymap(style_status, subset=['Sync Status']), use_container_width=True)
 
 except Exception as e:
     st.error(f"Engine Debug Alert: {e}")
