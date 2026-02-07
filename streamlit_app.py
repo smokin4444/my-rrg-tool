@@ -11,12 +11,13 @@ st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 # --- TICKER TRANSLATION MAP ---
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
-    "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps (Russell 2000)", 
+    "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
     "IJR": "Small Cap Core", "GLD": "Gold", "SLV": "Silver", "COPX": "Copper Miners", 
     "XLE": "Energy Sector", "BTC-USD": "Bitcoin", "XLK": "Technology", "XLY": "Consumer Disc", 
     "XLC": "Communication", "XBI": "Biotech", "XLF": "Financials", "XLI": "Industrials", 
     "XLV": "Health Care", "XLP": "Consumer Staples", "XLU": "Utilities", "XLB": "Materials", 
-    "XLRE": "Real Estate", "BTC": "Bitcoin"
+    "XLRE": "Real Estate", "CBA.AX": "Commonwealth Bank", "BHP.AX": "BHP Group", 
+    "CSL.AX": "CSL Limited", "NAB.AX": "National Australia Bank", "WBC.AX": "Westpac"
 }
 
 # --- LISTS ---
@@ -53,28 +54,23 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- HARDENED ENGINE ---
+# --- ENGINE ---
 def get_rrg_metrics(df_raw, ticker, b_ticker, is_weekly=False):
     try:
         if ticker not in df_raw.columns.get_level_values(0): return None
-        px = df_raw[ticker]['Close'].dropna()
-        bx = df_raw[b_ticker]['Close'].dropna()
+        px, bx = df_raw[ticker]['Close'].dropna(), df_raw[b_ticker]['Close'].dropna()
         common = px.index.intersection(bx.index)
         if len(common) < 30: return None
-        
         rel = (px.loc[common] / bx.loc[common]) * 100
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
-        
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         if len(df_res) < 5: return None
         if is_weekly: df_res['date'] = df_res['date'] + pd.Timedelta(days=4)
-        
         ch = np.sqrt((df_res['x'].iloc[-1] - df_res['x'].iloc[-5])**2 + (df_res['y'].iloc[-1] - df_res['y'].iloc[-5])**2)
         vol_data = df_raw[ticker].get('Volume', None)
         rv = (vol_data.iloc[-1] / vol_data.tail(20).mean()) if vol_data is not None and not vol_data.empty else 1.0
-        
         return df_res, round(ch, 2), rv
     except: return None
 
@@ -97,15 +93,9 @@ def run_analysis(ticker_str, bench):
         w_res = get_rrg_metrics(w_data, t, bench_ticker, True)
         if d_res and w_res:
             history["Daily"][t], history["Weekly"][t] = d_res[0], w_res[0]
-            dr, dm = d_res[0]['x'].iloc[-1], d_res[0]['y'].iloc[-1]
-            wr, wm = w_res[0]['x'].iloc[-1], w_res[0]['y'].iloc[-1]
-            dq, wq = get_quadrant(dr, dm), get_quadrant(wr, wm)
-            status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
-                     "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
-                     "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
-                     "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
+            dq, wq = get_quadrant(d_res[0]['x'].iloc[-1], d_res[0]['y'].iloc[-1]), get_quadrant(w_res[0]['x'].iloc[-1], w_res[0]['y'].iloc[-1])
             is_synced = "✅ SYNCED" if dq == wq else "---"
-            table_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Sync Status": status, "Daily Quad": dq, "Weekly Quad": wq, "Sync Radar": is_synced, "RS-Ratio": round(dr, 2), "Rel Vol": d_res[2]})
+            table_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Daily Quad": dq, "Weekly Quad": wq, "Sync Radar": is_synced, "RS-Ratio": round(d_res[0]['x'].iloc[-1], 2), "Rel Vol": d_res[2]})
     return pd.DataFrame(table_data), history
 
 # --- DISPLAY ---
@@ -114,46 +104,43 @@ try:
     if not df_main.empty:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
-        fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.15)", layer="below", line_width=0)
-        fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="gray", width=1, dash="dash"))
-        fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="gray", width=1, dash="dash"))
+        
+        # Quadrant Backgrounds
+        fig.add_vrect(x0=100, x1=105, y0=100, y1=105, fillcolor="rgba(46, 204, 113, 0.1)", layer="below", line_width=0) # Leading
+        fig.add_shape(type="line", x0=100, y0=80, x1=100, y1=120, line=dict(color="gray", width=1, dash="dash"))
+        fig.add_shape(type="line", x0=80, y0=100, x1=120, y1=100, line=dict(color="gray", width=1, dash="dash"))
         
         for i, (t, df) in enumerate(history_data[timeframe].items()):
-            if filter_setups and t not in df_main[df_main['Sync Status'] != "DIVERGED"]['Ticker'].values: continue
-            
-            color = px.colors.qualitative.Plotly[i % 10]
+            color = px.colors.qualitative.Alphabet[i % 26]
             full_name = TICKER_NAMES.get(t, t)
             df_p = df.tail(tail_len)
             df_p['d_label'] = df_p['date'].dt.strftime('%b %d')
             
-            # Hover customization for both tail and diamond
-            if tail_len > 1:
-                fig.add_trace(go.Scatter(
-                    x=df_p['x'], y=df_p['y'], mode='lines+markers', name=f"{t} ({full_name})", 
-                    line=dict(color=color, shape='spline'), marker=dict(size=8), 
-                    customdata=df_p['d_label'], 
-                    hovertemplate=f"<b>{t} | {full_name}</b><br>Date: %{{customdata}}<br>Ratio: %{{x:.2f}}<br>Momentum: %{{y:.2f}}<extra></extra>",
-                    opacity=0.4))
+            # Tail
+            fig.add_trace(go.Scatter(
+                x=df_p['x'], y=df_p['y'], mode='lines', name=f"{t}", 
+                line=dict(color=color, width=2), opacity=0.4, showlegend=True,
+                hoverinfo='skip'))
             
+            # Head (Diamond)
             fig.add_trace(go.Scatter(
                 x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', 
-                marker=dict(symbol='diamond', size=16, color=color, line=dict(width=2, color='white')), 
+                marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1, color='white')), 
                 text=[t], textposition="top center", showlegend=False,
-                customdata=[df_p['d_label'].iloc[-1]],
-                hovertemplate=f"<b>{t} | {full_name}</b><br>LATEST<br>Ratio: %{{x:.2f}}<br>Momentum: %{{y:.2f}}<extra></extra>"))
+                customdata=[full_name],
+                hovertemplate=f"<b>{t} | %{{customdata}}</b><br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
             
-        fig.update_layout(template="plotly_white", height=750, xaxis=dict(range=[98, 102.5]), yaxis=dict(range=[98, 102.5]))
+        fig.update_layout(
+            template="plotly_white", 
+            height=900, 
+            margin=dict(l=20, r=20, t=20, b=20),
+            xaxis=dict(range=[98.5, 102], title="RS-Ratio (Trend)"),
+            yaxis=dict(range=[98.5, 102], title="RS-Momentum (Energy)"),
+            legend=dict(orientation="h", yanchor="bottom", y=-0.12, xanchor="center", x=0.5)
+        )
         st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("📊 Alpha Grid")
-        def style_sync(val):
-            colors = {"POWER WALK": "#9B59B6", "LEAD-THROUGH": "#E67E22", "BULLISH SYNC": "#2ECC71", "DAILY PIVOT": "#F1C40F"}
-            return f'background-color: {colors.get(val, "#FBFCFC")}; color: {"white" if val in ["POWER WALK", "LEAD-THROUGH"] else "black"}; font-weight: bold'
-        
-        df_disp = df_main.sort_values(by='RS-Ratio', ascending=False)
-        if filter_setups: df_disp = df_disp[df_disp['Sync Status'] != "DIVERGED"]
-        
-        # Displaying 'Name' column in table too
-        st.dataframe(df_disp.style.map(style_sync, subset=['Sync Status']).format({"Rel Vol": "{:.2f}x"}), use_container_width=True)
+        st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False), use_container_width=True)
 except Exception as e:
     st.error(f"Dashboard Error: {e}")
