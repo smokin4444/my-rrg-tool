@@ -41,7 +41,7 @@ with st.sidebar:
     
     st.markdown("---")
     timeframe = st.radio("Timeframe:", ["Daily", "Weekly"])
-    tail_len = st.slider("Tail Length:", 2, 30, 10)
+    tail_len = st.slider("Tail Length:", 2, 30, 12)
     
     if st.button("♻️ Reset Engine"):
         st.cache_data.clear()
@@ -50,19 +50,16 @@ with st.sidebar:
 # --- ENGINE ---
 def get_metrics(df_raw, ticker, b_ticker, is_weekly):
     try:
-        px = df_raw[ticker]['Close'].dropna()
-        bx = df_raw[b_ticker]['Close'].dropna()
+        px, bx = df_raw[ticker]['Close'].dropna(), df_raw[b_ticker]['Close'].dropna()
         common = px.index.intersection(bx.index)
         if len(common) < 20: return None
-        
         rel = (px.loc[common] / bx.loc[common]) * 100
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
-        
         if is_weekly: df_res['date'] = df_res['date'] + pd.Timedelta(days=4)
-        return df_res if len(df_res) >= 2 else None
+        return df_res
     except: return None
 
 def get_quadrant(x, y):
@@ -101,41 +98,34 @@ try:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
         
-        # Quadrant Design
-        fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.4)", width=2, dash="dot"))
-        fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.4)", width=2, dash="dot"))
-        fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.15)", layer="below", line_width=0)
+        # Quadrant Lines & Shading
+        fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
+        fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
+        fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.12)", layer="below", line_width=0)
 
-        # Labels (Outer positions)
+        # Permanent Outer Labels
         for label, x, y, col in [("LEADING", 102.3, 102.3, "green"), ("IMPROVING", 97.7, 102.3, "blue"), ("LAGGING", 97.7, 97.7, "red"), ("WEAKENING", 102.3, 97.7, "orange")]:
-            fig.add_annotation(x=x, y=y, text=f"<b>{label}</b>", showarrow=False, font=dict(color=col, size=14), opacity=0.3)
+            fig.add_annotation(x=x, y=y, text=f"<b>{label}</b>", showarrow=False, font=dict(color=col, size=14), opacity=0.4)
 
         for i, (t, df) in enumerate(history_data[timeframe].items()):
             color = px.colors.qualitative.Alphabet[i % 26]
-            avail_len = len(df)
-            actual_tail = min(tail_len, avail_len)
+            df_p = df.iloc[-min(tail_len, len(df)):]
             
-            # --- COMET TAIL WITH DOTS ---
-            if actual_tail >= 2:
-                df_p = df.iloc[-actual_tail:]
-                for j in range(len(df_p) - 1):
-                    # Fading Opacity
-                    op = (j + 1) / len(df_p) * 0.5
-                    fig.add_trace(go.Scatter(
-                        x=df_p['x'].iloc[j:j+2], y=df_p['y'].iloc[j:j+2], 
-                        mode='lines+markers', # RE-ENABLED MARKERS
-                        line=dict(color=color, width=3, shape='spline'),
-                        marker=dict(size=5, color=color, opacity=op), # TAIL DOTS
-                        showlegend=False, hoverinfo='skip'))
+            # --- SOLID TAIL WITH VISIBLE DOTS ---
+            fig.add_trace(go.Scatter(
+                x=df_p['x'], y=df_p['y'], 
+                mode='lines+markers', # Force markers on
+                line=dict(color=color, width=3, shape='spline'),
+                marker=dict(size=6, color=color, opacity=0.6, line=dict(width=1, color='white')), 
+                name=f"{t} ({TICKER_NAMES.get(t, t)})",
+                showlegend=True))
             
             # --- HEAD DIAMOND ---
-            head_x, head_y = df['x'].iloc[-1], df['y'].iloc[-1]
             fig.add_trace(go.Scatter(
-                x=[head_x], y=[head_y], mode='markers+text', 
-                marker=dict(symbol='diamond', size=16, color=color, line=dict(width=1.5, color='white')), 
-                text=[t], textposition="top center", name=f"{t}",
-                customdata=[TICKER_NAMES.get(t, t)],
-                hovertemplate=f"<b>{t} | %{{customdata}}</b><br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
+                x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', 
+                marker=dict(symbol='diamond', size=18, color=color, line=dict(width=2, color='white')), 
+                text=[t], textposition="top center", showlegend=False,
+                hovertemplate=f"<b>{t}</b><br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
             
         fig.update_layout(template="plotly_white", height=850, 
                           xaxis=dict(range=[97.5, 102.5], title="RS-Ratio"),
