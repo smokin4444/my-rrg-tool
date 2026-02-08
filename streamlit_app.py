@@ -53,22 +53,20 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- ENGINE ---
+# --- HARDENED ENGINE ---
 def get_metrics(df_raw, ticker, b_ticker):
     try:
-        # Get raw close prices
+        if ticker not in df_raw.columns.get_level_values(0): return None
         px = df_raw[ticker]['Close'].dropna()
         bx = df_raw[b_ticker]['Close'].dropna()
         
-        # Intersection to align dates exactly
         common = px.index.intersection(bx.index)
-        if len(common) < 30: return None
+        if len(common) < 20: return None # Lowered threshold slightly for newer ETFs
         
-        # Final safety truncation
-        px_aligned = px.loc[common]
-        bx_aligned = bx.loc[common]
+        px_aligned, bx_aligned = px.loc[common], bx.loc[common]
         
         rel = (px_aligned / bx_aligned) * 100
+        # Rolling window of 14 requires at least 15 points
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
@@ -86,52 +84,55 @@ def get_quadrant(x, y):
     return "WEAKENING"
 
 @st.cache_data(ttl=600)
-def run_analysis(ticker_str, bench):
+def run_analysis(ticker_str, bench, tf_choice):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
     bench_ticker = bench.strip().upper()
     all_list = list(set(tickers + [bench_ticker]))
     
-    # Download data
-    data = yf.download(all_list, period="2y", interval="1d", group_by='ticker', progress=False)
-    w_data = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
+    # Selection determines interval
+    interval = "1d" if tf_choice == "Daily" else "1wk"
+    data_fetch = yf.download(all_list, period="2y", interval=interval, group_by='ticker', progress=False)
     
-    history, table_data = {"Daily": {}, "Weekly": {}}, []
+    # We still need weekly for the Sync Status calculation
+    if tf_choice == "Daily":
+        w_data = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
+    else:
+        w_data = data_fetch
+
+    history, table_data = {}, []
     for t in tickers:
-        # Use only Daily for charts to maintain accuracy
-        d_res = get_metrics(data, t, bench_ticker)
+        res = get_metrics(data_fetch, t, bench_ticker)
         w_res = get_metrics(w_data, t, bench_ticker)
         
-        if d_res is not None and w_res is not None:
-            history["Daily"][t], history["Weekly"][t] = d_res, w_res
+        if res is not None and not res.empty:
+            history[t] = res
+            dr, dm = res['x'].iloc[-1], res['y'].iloc[-1]
+            dq = get_quadrant(dr, dm)
             
-            # Use current timeframe selection for table metrics
-            active_df = d_res if timeframe == "Daily" else w_res
-            if not active_df.empty:
-                dr, dm = active_df['x'].iloc[-1], active_df['y'].iloc[-1]
-                dq = get_quadrant(dr, dm)
-                wq = get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
-                
-                # Crossing Logic
-                cross_alert = "---"
-                if len(active_df) > 5:
-                    was_below = (active_df['x'].iloc[-6:-1] < 100).any()
-                    if was_below and dr >= 100 and dm >= 100:
-                        cross_alert = "🔥 CROSSING"
+            # Sync Logic
+            wq = get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1]) if w_res is not None else "N/A"
+            
+            # Crossing Alert
+            cross_alert = "---"
+            if len(res) > 5:
+                was_below = (res['x'].iloc[-6:-1] < 100).any()
+                if was_below and dr >= 100 and dm >= 100:
+                    cross_alert = "🔥 CROSSING"
 
-                status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
-                         "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
-                         "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
-                         "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
-                
-                table_data.append({
-                    "Ticker": t, "Name": TICKER_NAMES.get(t, t), "12 O'Clock Alert": cross_alert,
-                    "Sync Status": status, "RS-Ratio": round(dr, 2)
-                })
+            status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
+                     "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
+                     "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
+                     "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
+            
+            table_data.append({
+                "Ticker": t, "Name": TICKER_NAMES.get(t, t), "12 O'Clock Alert": cross_alert,
+                "Sync Status": status, "RS-Ratio": round(dr, 2)
+            })
     return pd.DataFrame(table_data), history
 
 # --- DISPLAY ---
 try:
-    df_main, history_data = run_analysis(tickers_input, benchmark)
+    df_main, history_data = run_analysis(tickers_input, benchmark, timeframe)
     if not df_main.empty:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
@@ -144,9 +145,15 @@ try:
         for label, x, y, col in [("LEADING", 102.3, 102.3, "green"), ("IMPROVING", 97.7, 102.3, "blue"), ("LAGGING", 97.7, 97.7, "red"), ("WEAKENING", 102.3, 97.7, "orange")]:
             fig.add_annotation(x=x, y=y, text=f"<b>{label}</b>", showarrow=False, font=dict(color=col, size=14), opacity=0.4)
 
-        for i, (t, df) in enumerate(history_data[timeframe].items()):
+        for i, (t, df) in enumerate(history_data.items()):
             color = px.colors.qualitative.Alphabet[i % 26]
-            df_p = df.iloc[-min(tail_len, len(df)):]
+            
+            # DYNAMIC TAIL GUARD: Check if df has enough rows for requested tail
+            avail = len(df)
+            safe_tail = min(tail_len, avail)
+            if safe_tail < 1: continue
+            
+            df_p = df.iloc[-safe_tail:]
             
             fig.add_trace(go.Scatter(
                 x=df_p['x'], y=df_p['y'], mode='lines+markers',
@@ -176,4 +183,4 @@ try:
 
         st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False).style.applymap(style_status, subset=['Sync Status']).applymap(style_alert, subset=["12 O'Clock Alert"]), use_container_width=True)
 except Exception as e:
-    st.error(f"Engine Alert: {e}")
+    st.error(f"Engine Alert: {e}. Check if a ticker has enough historical data.")
