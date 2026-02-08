@@ -29,7 +29,7 @@ MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IB
 SECTOR_ROTATION = "XLK, XLY, XLC, XBI, XLF, XLI, XLE, XLV, XLP, XLU, XLB, XLRE, PSCT, PSCD, PSCF, PSCI, PSCH, PSCC, PSCU, PSCM, PSCE"
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
 STARTUP_THEMES = "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
-CUSTOM_LIST = "" # Kept blank for individual stock checks
+CUSTOM_LIST = ""
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -53,15 +53,21 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- HARDENED ENGINE ---
+# --- ENGINE ---
 def get_metrics(df_raw, ticker, b_ticker):
     try:
+        # Get raw close prices
         px = df_raw[ticker]['Close'].dropna()
         bx = df_raw[b_ticker]['Close'].dropna()
-        common = px.index.intersection(bx.index)
-        if len(common) < 25: return None
         
-        px_aligned, bx_aligned = px.loc[common], bx.loc[common]
+        # Intersection to align dates exactly
+        common = px.index.intersection(bx.index)
+        if len(common) < 30: return None
+        
+        # Final safety truncation
+        px_aligned = px.loc[common]
+        bx_aligned = bx.loc[common]
+        
         rel = (px_aligned / bx_aligned) * 100
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
@@ -70,7 +76,8 @@ def get_metrics(df_raw, ticker, b_ticker):
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         df_res['date_str'] = df_res['date'].dt.strftime('%b %d, %Y')
         return df_res
-    except: return None
+    except:
+        return None
 
 def get_quadrant(x, y):
     if x >= 100 and y >= 100: return "LEADING"
@@ -83,34 +90,43 @@ def run_analysis(ticker_str, bench):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
     bench_ticker = bench.strip().upper()
     all_list = list(set(tickers + [bench_ticker]))
+    
+    # Download data
     data = yf.download(all_list, period="2y", interval="1d", group_by='ticker', progress=False)
     w_data = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
     
     history, table_data = {"Daily": {}, "Weekly": {}}, []
     for t in tickers:
+        # Use only Daily for charts to maintain accuracy
         d_res = get_metrics(data, t, bench_ticker)
         w_res = get_metrics(w_data, t, bench_ticker)
+        
         if d_res is not None and w_res is not None:
             history["Daily"][t], history["Weekly"][t] = d_res, w_res
-            dr, dm = d_res['x'].iloc[-1], d_res['y'].iloc[-1]
-            dq, wq = get_quadrant(dr, dm), get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
             
-            # Precision 12 O'Clock Logic
-            cross_alert = "---"
-            if len(d_res) > 5:
-                was_below = (d_res['x'].iloc[-6:-1] < 100).any()
-                if was_below and dr >= 100 and dm >= 100:
-                    cross_alert = "🔥 CROSSING"
+            # Use current timeframe selection for table metrics
+            active_df = d_res if timeframe == "Daily" else w_res
+            if not active_df.empty:
+                dr, dm = active_df['x'].iloc[-1], active_df['y'].iloc[-1]
+                dq = get_quadrant(dr, dm)
+                wq = get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
+                
+                # Crossing Logic
+                cross_alert = "---"
+                if len(active_df) > 5:
+                    was_below = (active_df['x'].iloc[-6:-1] < 100).any()
+                    if was_below and dr >= 100 and dm >= 100:
+                        cross_alert = "🔥 CROSSING"
 
-            status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
-                     "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
-                     "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
-                     "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
-            
-            table_data.append({
-                "Ticker": t, "Name": TICKER_NAMES.get(t, t), "12 O'Clock Alert": cross_alert,
-                "Sync Status": status, "Daily Quad": dq, "Weekly Quad": wq, "RS-Ratio": round(dr, 2)
-            })
+                status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
+                         "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
+                         "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
+                         "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
+                
+                table_data.append({
+                    "Ticker": t, "Name": TICKER_NAMES.get(t, t), "12 O'Clock Alert": cross_alert,
+                    "Sync Status": status, "RS-Ratio": round(dr, 2)
+                })
     return pd.DataFrame(table_data), history
 
 # --- DISPLAY ---
