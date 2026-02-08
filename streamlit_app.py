@@ -29,16 +29,18 @@ MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IB
 SECTOR_ROTATION = "XLK, XLY, XLC, XBI, XLF, XLI, XLE, XLV, XLP, XLU, XLB, XLRE, PSCT, PSCD, PSCF, PSCI, PSCH, PSCC, PSCU, PSCM, PSCE"
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
 STARTUP_THEMES = "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
+CUSTOM_LIST = "" # Kept blank for individual stock checks
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("🎯 Watchlist")
-    heap_type = st.radio("Choose Group:", ["Major Themes", "Sector Rotation", "Energy Torque", "Startup"])
+    heap_type = st.radio("Choose Group:", ["Major Themes", "Sector Rotation", "Energy Torque", "Startup", "Single/Custom"])
     
     if heap_type == "Major Themes": current_list, auto_bench = MAJOR_THEMES, "SPY"
     elif heap_type == "Sector Rotation": current_list, auto_bench = SECTOR_ROTATION, "SPY"
     elif heap_type == "Energy Torque": current_list, auto_bench = ENERGY_TORQUE, "XLE"
     elif heap_type == "Startup": current_list, auto_bench = STARTUP_THEMES, "SPY"
+    elif heap_type == "Single/Custom": current_list, auto_bench = CUSTOM_LIST, "SPY"
     
     tickers_input = st.text_area("Ticker Heap:", value=current_list, height=150)
     benchmark = st.text_input("Active Benchmark:", value=auto_bench)
@@ -52,16 +54,19 @@ with st.sidebar:
         st.rerun()
 
 # --- HARDENED ENGINE ---
-def get_metrics(df_raw, ticker, b_ticker, is_weekly):
+def get_metrics(df_raw, ticker, b_ticker):
     try:
         px = df_raw[ticker]['Close'].dropna()
         bx = df_raw[b_ticker]['Close'].dropna()
         common = px.index.intersection(bx.index)
         if len(common) < 25: return None
-        rel = (px.loc[common] / bx.loc[common]) * 100
+        
+        px_aligned, bx_aligned = px.loc[common], bx.loc[common]
+        rel = (px_aligned / bx_aligned) * 100
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
+        
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         df_res['date_str'] = df_res['date'].dt.strftime('%b %d, %Y')
         return df_res
@@ -83,36 +88,29 @@ def run_analysis(ticker_str, bench):
     
     history, table_data = {"Daily": {}, "Weekly": {}}, []
     for t in tickers:
-        d_res = get_metrics(data, t, bench_ticker, False)
-        w_res = get_metrics(w_data, t, bench_ticker, True)
+        d_res = get_metrics(data, t, bench_ticker)
+        w_res = get_metrics(w_data, t, bench_ticker)
         if d_res is not None and w_res is not None:
             history["Daily"][t], history["Weekly"][t] = d_res, w_res
-            if not d_res.empty:
-                # Precision 12 O'Clock Logic
-                dr, dm = d_res['x'].iloc[-1], d_res['y'].iloc[-1]
-                dq = get_quadrant(dr, dm)
-                wq = get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
-                
-                # Check for REAL-TIME CROSS (Lookback for the move into 100+)
-                cross_alert = "---"
-                if len(d_res) > 5:
-                    current_x = d_res['x'].iloc[-1]
-                    current_y = d_res['y'].iloc[-1]
-                    # Looking back 5 periods to see if we were below 100 and are NOW above 100
-                    was_below = (d_res['x'].iloc[-6:-1] < 100).any()
-                    is_above = current_x >= 100 and current_y >= 100
-                    if was_below and is_above:
-                        cross_alert = "🔥 CROSSING"
+            dr, dm = d_res['x'].iloc[-1], d_res['y'].iloc[-1]
+            dq, wq = get_quadrant(dr, dm), get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
+            
+            # Precision 12 O'Clock Logic
+            cross_alert = "---"
+            if len(d_res) > 5:
+                was_below = (d_res['x'].iloc[-6:-1] < 100).any()
+                if was_below and dr >= 100 and dm >= 100:
+                    cross_alert = "🔥 CROSSING"
 
-                status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
-                         "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
-                         "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
-                         "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
-                
-                table_data.append({
-                    "Ticker": t, "Name": TICKER_NAMES.get(t, t), "12 O'Clock Alert": cross_alert,
-                    "Sync Status": status, "Daily Quad": dq, "Weekly Quad": wq, "RS-Ratio": round(dr, 2)
-                })
+            status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
+                     "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
+                     "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
+                     "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
+            
+            table_data.append({
+                "Ticker": t, "Name": TICKER_NAMES.get(t, t), "12 O'Clock Alert": cross_alert,
+                "Sync Status": status, "Daily Quad": dq, "Weekly Quad": wq, "RS-Ratio": round(dr, 2)
+            })
     return pd.DataFrame(table_data), history
 
 # --- DISPLAY ---
@@ -122,7 +120,7 @@ try:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
         
-        # Quadrant Lines
+        # Quadrant Design
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.12)", layer="below", line_width=0)
@@ -132,18 +130,14 @@ try:
 
         for i, (t, df) in enumerate(history_data[timeframe].items()):
             color = px.colors.qualitative.Alphabet[i % 26]
-            avail_len = len(df)
-            if avail_len < 2: continue
-            df_p = df.iloc[-min(tail_len, avail_len):]
+            df_p = df.iloc[-min(tail_len, len(df)):]
             
             fig.add_trace(go.Scatter(
                 x=df_p['x'], y=df_p['y'], mode='lines+markers',
                 line=dict(color=color, width=3, shape='spline'),
                 marker=dict(size=6, color=color, opacity=0.8, line=dict(width=1, color='white')), 
-                name=f"{t} ({TICKER_NAMES.get(t, t)})",
-                customdata=df_p['date_str'],
-                hovertemplate=f"<b>{t} | {TICKER_NAMES.get(t, t)}</b><br>Date: %{{customdata}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>",
-                showlegend=True))
+                name=f"{t}", customdata=df_p['date_str'],
+                hovertemplate=f"<b>{t}</b><br>Date: %{{customdata}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
             
             fig.add_trace(go.Scatter(
                 x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', 
