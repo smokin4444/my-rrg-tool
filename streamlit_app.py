@@ -54,14 +54,11 @@ with st.sidebar:
 # --- HARDENED ENGINE ---
 def get_metrics(df_raw, ticker, b_ticker, is_weekly):
     try:
-        if ticker not in df_raw.columns.get_level_values(0): return None
         px = df_raw[ticker]['Close'].dropna()
         bx = df_raw[b_ticker]['Close'].dropna()
         common = px.index.intersection(bx.index)
         if len(common) < 25: return None
-        px_aligned = px.loc[common]
-        bx_aligned = bx.loc[common]
-        rel = (px_aligned / bx_aligned) * 100
+        rel = (px.loc[common] / bx.loc[common]) * 100
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
@@ -90,21 +87,21 @@ def run_analysis(ticker_str, bench):
         w_res = get_metrics(w_data, t, bench_ticker, True)
         if d_res is not None and w_res is not None:
             history["Daily"][t], history["Weekly"][t] = d_res, w_res
-            if not d_res.empty and not w_res.empty:
-                # Get current and historical quadrants
+            if not d_res.empty:
+                # Precision 12 O'Clock Logic
                 dr, dm = d_res['x'].iloc[-1], d_res['y'].iloc[-1]
                 dq = get_quadrant(dr, dm)
                 wq = get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
                 
-                # Check for 12 o'clock cross (Last 5 periods)
+                # Check for REAL-TIME CROSS (Lookback for the move into 100+)
                 cross_alert = "---"
-                history_subset = d_res.tail(6)
-                if len(history_subset) >= 6:
-                    prev_x = history_subset['x'].iloc[0]
-                    curr_x = history_subset['x'].iloc[-1]
-                    prev_y = history_subset['y'].iloc[0]
-                    curr_y = history_subset['y'].iloc[-1]
-                    if prev_x < 100 and curr_x >= 100 and curr_y >= 100:
+                if len(d_res) > 5:
+                    current_x = d_res['x'].iloc[-1]
+                    current_y = d_res['y'].iloc[-1]
+                    # Looking back 5 periods to see if we were below 100 and are NOW above 100
+                    was_below = (d_res['x'].iloc[-6:-1] < 100).any()
+                    is_above = current_x >= 100 and current_y >= 100
+                    if was_below and is_above:
                         cross_alert = "🔥 CROSSING"
 
                 status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
@@ -125,7 +122,7 @@ try:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
         
-        # Quadrant Design
+        # Quadrant Lines
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.12)", layer="below", line_width=0)
