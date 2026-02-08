@@ -26,18 +26,13 @@ TICKER_NAMES = {
 
 # --- STATIC LISTS ---
 MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT"
-
-# Now contains both Large Cap (XL*) and Small Cap (PSC*) counterparts
 SECTOR_ROTATION = "XLK, XLY, XLC, XBI, XLF, XLI, XLE, XLV, XLP, XLU, XLB, XLRE, PSCT, PSCD, PSCF, PSCI, PSCH, PSCC, PSCU, PSCM, PSCE"
-
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
-
 STARTUP_THEMES = "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("🎯 Watchlist")
-    # Toggling these will now pull from the static lists above
     heap_type = st.radio("Choose Group:", ["Major Themes", "Sector Rotation", "Energy Torque", "Startup"])
     
     if heap_type == "Major Themes": current_list, auto_bench = MAJOR_THEMES, "SPY"
@@ -63,17 +58,13 @@ def get_metrics(df_raw, ticker, b_ticker, is_weekly):
         px = df_raw[ticker]['Close'].dropna()
         bx = df_raw[b_ticker]['Close'].dropna()
         common = px.index.intersection(bx.index)
-        
         if len(common) < 25: return None
-        
         px_aligned = px.loc[common]
         bx_aligned = bx.loc[common]
-        
         rel = (px_aligned / bx_aligned) * 100
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
-        
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         df_res['date_str'] = df_res['date'].dt.strftime('%b %d, %Y')
         return df_res
@@ -90,7 +81,6 @@ def run_analysis(ticker_str, bench):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
     bench_ticker = bench.strip().upper()
     all_list = list(set(tickers + [bench_ticker]))
-    
     data = yf.download(all_list, period="2y", interval="1d", group_by='ticker', progress=False)
     w_data = yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
     
@@ -101,13 +91,31 @@ def run_analysis(ticker_str, bench):
         if d_res is not None and w_res is not None:
             history["Daily"][t], history["Weekly"][t] = d_res, w_res
             if not d_res.empty and not w_res.empty:
+                # Get current and historical quadrants
                 dr, dm = d_res['x'].iloc[-1], d_res['y'].iloc[-1]
-                dq, wq = get_quadrant(dr, dm), get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
+                dq = get_quadrant(dr, dm)
+                wq = get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1])
+                
+                # Check for 12 o'clock cross (Last 5 periods)
+                cross_alert = "---"
+                history_subset = d_res.tail(6)
+                if len(history_subset) >= 6:
+                    prev_x = history_subset['x'].iloc[0]
+                    curr_x = history_subset['x'].iloc[-1]
+                    prev_y = history_subset['y'].iloc[0]
+                    curr_y = history_subset['y'].iloc[-1]
+                    if prev_x < 100 and curr_x >= 100 and curr_y >= 100:
+                        cross_alert = "🔥 CROSSING"
+
                 status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
                          "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
                          "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
                          "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
-                table_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Sync Status": status, "Daily Quad": dq, "Weekly Quad": wq, "Sync Radar": "✅ SYNCED" if dq == wq else "---", "RS-Ratio": round(dr, 2)})
+                
+                table_data.append({
+                    "Ticker": t, "Name": TICKER_NAMES.get(t, t), "12 O'Clock Alert": cross_alert,
+                    "Sync Status": status, "Daily Quad": dq, "Weekly Quad": wq, "RS-Ratio": round(dr, 2)
+                })
     return pd.DataFrame(table_data), history
 
 # --- DISPLAY ---
@@ -122,42 +130,33 @@ try:
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.12)", layer="below", line_width=0)
 
-        # Labels (Pushed to corners)
         for label, x, y, col in [("LEADING", 102.3, 102.3, "green"), ("IMPROVING", 97.7, 102.3, "blue"), ("LAGGING", 97.7, 97.7, "red"), ("WEAKENING", 102.3, 97.7, "orange")]:
             fig.add_annotation(x=x, y=y, text=f"<b>{label}</b>", showarrow=False, font=dict(color=col, size=14), opacity=0.4)
 
         for i, (t, df) in enumerate(history_data[timeframe].items()):
             color = px.colors.qualitative.Alphabet[i % 26]
-            full_name = TICKER_NAMES.get(t, t)
-            
             avail_len = len(df)
             if avail_len < 2: continue
+            df_p = df.iloc[-min(tail_len, avail_len):]
             
-            actual_points = min(tail_len, avail_len)
-            df_p = df.iloc[-actual_points:]
-            
-            # Solid Tail with Markers
             fig.add_trace(go.Scatter(
                 x=df_p['x'], y=df_p['y'], mode='lines+markers',
                 line=dict(color=color, width=3, shape='spline'),
                 marker=dict(size=6, color=color, opacity=0.8, line=dict(width=1, color='white')), 
-                name=f"{t} ({full_name})",
+                name=f"{t} ({TICKER_NAMES.get(t, t)})",
                 customdata=df_p['date_str'],
-                hovertemplate=f"<b>{t} | {full_name}</b><br>Date: %{{customdata}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>",
+                hovertemplate=f"<b>{t} | {TICKER_NAMES.get(t, t)}</b><br>Date: %{{customdata}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>",
                 showlegend=True))
             
-            # Head Diamond
             fig.add_trace(go.Scatter(
                 x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', 
                 marker=dict(symbol='diamond', size=18, color=color, line=dict(width=2, color='white')), 
                 text=[t], textposition="top center", showlegend=False,
-                customdata=[[full_name, df_p['date_str'].iloc[-1]]],
+                customdata=[[TICKER_NAMES.get(t, t), df_p['date_str'].iloc[-1]]],
                 hovertemplate=f"<b>{t} | %{{customdata[0]}}</b><br>LATEST: %{{customdata[1]}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
             
-        fig.update_layout(template="plotly_white", height=850, 
-                          xaxis=dict(range=[97.5, 102.5], title="RS-Ratio"),
-                          yaxis=dict(range=[97.5, 102.5], title="RS-Momentum"),
-                          legend=dict(orientation="h", y=-0.12, xanchor="center", x=0.5))
+        fig.update_layout(template="plotly_white", height=850, xaxis=dict(range=[97.5, 102.5], title="RS-Ratio"),
+                          yaxis=dict(range=[97.5, 102.5], title="RS-Momentum"), legend=dict(orientation="h", y=-0.12, xanchor="center", x=0.5))
         st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("📊 Alpha Grid")
@@ -165,7 +164,9 @@ try:
             color_map = {"POWER WALK": "background-color: #9B59B6; color: white;", "LEAD-THROUGH": "background-color: #E67E22; color: white;",
                          "BULLISH SYNC": "background-color: #2ECC71; color: white;", "DAILY PIVOT": "background-color: #F1C40F; color: black;"}
             return color_map.get(val, "")
+        def style_alert(val):
+            return "background-color: #E74C3C; color: white; font-weight: bold;" if val == "🔥 CROSSING" else ""
 
-        st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False).style.applymap(style_status, subset=['Sync Status']), use_container_width=True)
+        st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False).style.applymap(style_status, subset=['Sync Status']).applymap(style_alert, subset=["12 O'Clock Alert"]), use_container_width=True)
 except Exception as e:
     st.error(f"Engine Alert: {e}")
