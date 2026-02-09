@@ -20,7 +20,9 @@ TICKER_NAMES = {
     "XLB": "Materials (Large)", "XLRE": "Real Estate (Large)",
     "PSCT": "Tech (Small)", "PSCE": "Energy (Small)", "OII": "Oceaneering Intl",
     "GC=F": "GOLD (Live)", "SI=F": "SILVER (Live)", "HG=F": "COPPER (Live)", 
-    "CL=F": "CRUDE OIL (Live)", "BZ=F": "BRENT OIL (Live)", "NG=F": "NAT GAS (Live)", "PL=F": "PLATINUM (Live)"
+    "CL=F": "CRUDE OIL (Live)", "BZ=F": "BRENT OIL (Live)", "NG=F": "NAT GAS (Live)", 
+    "PL=F": "PLATINUM (Live)", "PA=F": "PALLADIUM (Live)", "TIO=F": "IRON ORE (Live)",
+    "ALB": "LITHIUM (Proxy)", "URNM": "URANIUM (Proxy)", "ZS=F": "SOYBEANS (Live)"
 }
 
 # --- STATIC LISTS ---
@@ -29,7 +31,7 @@ SECTOR_ROTATION = "XLK, XLY, XLC, XBI, XLF, XLI, XLE, XLV, XLP, XLU, XLB, XLRE, 
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
 STARTUP_THEMES = "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
 TECH_THEMES = "AIQ, SMH, SOXX, SETM, URNM, VST, BOTZ, HOOD, IBIT, LUNR, QTUM, AVAV, LIT, IGV"
-HARD_ASSETS_LIVE = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F"
+HARD_ASSETS_LIVE = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, URNM, ZS=F"
 CUSTOM_LIST = ""
 
 # --- SIDEBAR ---
@@ -42,7 +44,7 @@ with st.sidebar:
     elif heap_type == "Energy Torque": current_list, auto_bench = ENERGY_TORQUE, "XLE"
     elif heap_type == "Startup": current_list, auto_bench = STARTUP_THEMES, "SPY"
     elif heap_type == "Tech Themes": current_list, auto_bench = TECH_THEMES, "QQQ"
-    elif heap_type == "Hard Assets (Live)": current_list, auto_bench = HARD_ASSETS_LIVE, "GC=F"
+    elif heap_type == "Hard Assets (Live)": current_list, auto_bench = HARD_ASSETS_LIVE, "HG=F"
     elif heap_type == "Single/Custom": current_list, auto_bench = CUSTOM_LIST, "SPY"
     
     tickers_input = st.text_area("Ticker Heap:", value=current_list, height=150)
@@ -62,17 +64,13 @@ def get_metrics(df_raw, ticker, b_ticker):
         if ticker not in df_raw.columns.get_level_values(0): return None
         px = df_raw[ticker]['Close'].dropna()
         bx = df_raw[b_ticker]['Close'].dropna()
-        
-        # STRICT INTERSECTION Logic
         common = px.index.intersection(bx.index)
         if len(common) < 30: return None
-        
         px_aligned, bx_aligned = px.loc[common], bx.loc[common]
         rel = (px_aligned / bx_aligned) * 100
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
-        
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         df_res['date_str'] = df_res['date'].dt.strftime('%b %d, %Y')
         return df_res
@@ -90,7 +88,6 @@ def run_analysis(ticker_str, bench, tf_choice):
     bench_ticker = bench.strip().upper()
     all_list = list(set(tickers + [bench_ticker]))
     interval = "1d" if tf_choice == "Daily" else "1wk"
-    
     data_fetch = yf.download(all_list, period="2y", interval=interval, group_by='ticker', progress=False)
     w_data = data_fetch if tf_choice == "Weekly" else yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
 
@@ -98,26 +95,20 @@ def run_analysis(ticker_str, bench, tf_choice):
     for t in tickers:
         res = get_metrics(data_fetch, t, bench_ticker)
         w_res = get_metrics(w_data, t, bench_ticker)
-        
         if res is not None and not res.empty and len(res) >= 2:
             history[t] = res
             dr, dm = res['x'].iloc[-1], res['y'].iloc[-1]
             dq = get_quadrant(dr, dm)
-            
-            # Weekly fallback safety
             wq = get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1]) if (w_res is not None and not w_res.empty) else "N/A"
-            
             cross_alert = "---"
             if len(res) > 5:
                 was_below = (res['x'].iloc[-6:-1] < 100).any()
                 if was_below and dr >= 100 and dm >= 100:
                     cross_alert = "🔥 CROSSING"
-
             status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
                      "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
                      "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
                      "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
-            
             table_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "12 O'Clock Alert": cross_alert, "Sync Status": status, "RS-Ratio": round(dr, 2)})
     return pd.DataFrame(table_data), history
 
@@ -127,7 +118,6 @@ try:
     if not df_main.empty:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
-        
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.12)", layer="below", line_width=0)
@@ -139,11 +129,9 @@ try:
             color = px.colors.qualitative.Alphabet[i % 26]
             safe_tail = min(tail_len, len(df))
             df_p = df.iloc[-safe_tail:]
-            
             fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines+markers', line=dict(color=color, width=3, shape='spline'),
                 marker=dict(size=6, color=color, opacity=0.8, line=dict(width=1, color='white')), name=f"{t}", customdata=df_p['date_str'],
                 hovertemplate=f"<b>{t}</b><br>Date: %{{customdata}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
-            
             fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', 
                 marker=dict(symbol='diamond', size=18, color=color, line=dict(width=2, color='white')), text=[t], textposition="top center", showlegend=False,
                 customdata=[[TICKER_NAMES.get(t, t), df_p['date_str'].iloc[-1]]], hovertemplate=f"<b>{t} | %{{customdata[0]}}</b><br>LATEST: %{{customdata[1]}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
@@ -159,4 +147,4 @@ try:
             return "background-color: #E74C3C; color: white; font-weight: bold;" if val == "🔥 CROSSING" else ""
         st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False).style.applymap(style_status, subset=['Sync Status']).applymap(style_alert, subset=["12 O'Clock Alert"]), use_container_width=True)
 except Exception as e:
-    st.error(f"Engine Alert: {e}. Check for data gaps in the Startup group.")
+    st.error(f"Engine Alert: {e}")
