@@ -18,7 +18,10 @@ TICKER_NAMES = {
     "XBI": "Biotech", "XLF": "Financials (Large)", "XLI": "Industrials (Large)", 
     "XLV": "Health Care (Large)", "XLP": "Cons Staples (Large)", "XLU": "Utilities (Large)", 
     "XLB": "Materials (Large)", "XLRE": "Real Estate (Large)",
-    "PSCT": "Tech (Small)", "PSCE": "Energy (Small)", "OII": "Oceaneering Intl",
+    "PSCT": "Tech (Small)", "PSCD": "Cons Disc (Small)", "PSCF": "Financials (Small)", 
+    "PSCI": "Industrials (Small)", "PSCH": "Health Care (Small)", "PSCC": "Cons Staples (Small)", 
+    "PSCU": "Utilities (Small)", "PSCM": "Materials (Small)", "PSCE": "Energy (Small)",
+    "AROC": "Archrock", "KGS": "Kodiak Gas", "LBRT": "Liberty Energy", "NE": "Noble Corp", "OII": "Oceaneering Intl",
     "GC=F": "GOLD (Live)", "SI=F": "SILVER (Live)", "HG=F": "COPPER (Live)", 
     "CL=F": "CRUDE OIL (Live)", "BZ=F": "BRENT OIL (Live)", "NG=F": "NAT GAS (Live)", 
     "PL=F": "PLATINUM (Live)", "PA=F": "PALLADIUM (Live)", "TIO=F": "IRON ORE (Live)",
@@ -48,7 +51,7 @@ with st.sidebar:
     elif heap_type == "Single/Custom": current_list, auto_bench = CUSTOM_LIST, "SPY"
     
     tickers_input = st.text_area("Ticker Heap:", value=current_list, height=150)
-    benchmark = st.text_input("Active Benchmark:", value=auto_bench)
+    benchmark = st.text_input("Active Benchmark (use 'ONE' for Absolute):", value=auto_bench)
     
     st.markdown("---")
     timeframe = st.radio("Timeframe:", ["Daily", "Weekly"])
@@ -59,18 +62,28 @@ with st.sidebar:
         st.rerun()
 
 # --- HARDENED ENGINE ---
-def get_metrics(df_raw, ticker, b_ticker):
+def get_metrics(df_raw, ticker, b_ticker, benchmark_val):
     try:
         if ticker not in df_raw.columns.get_level_values(0): return None
         px = df_raw[ticker]['Close'].dropna()
-        bx = df_raw[b_ticker]['Close'].dropna()
+        
+        # Handle "ONE" (Absolute Momentum) vs. Relative Benchmark
+        if benchmark_val.upper() == "ONE":
+            bx = pd.Series(1.0, index=px.index)
+        else:
+            bx = df_raw[b_ticker]['Close'].dropna()
+        
+        # STRICT INTERSECTION Logic
         common = px.index.intersection(bx.index)
-        if len(common) < 30: return None
+        if len(common) < 25: return None
+        
         px_aligned, bx_aligned = px.loc[common], bx.loc[common]
         rel = (px_aligned / bx_aligned) * 100
+        
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
         roc = ratio.diff(1)
         mom = 100 + ((roc - roc.rolling(14).mean()) / roc.rolling(14).std())
+        
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         df_res['date_str'] = df_res['date'].dt.strftime('%b %d, %Y')
         return df_res
@@ -86,29 +99,35 @@ def get_quadrant(x, y):
 def run_analysis(ticker_str, bench, tf_choice):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
     bench_ticker = bench.strip().upper()
-    all_list = list(set(tickers + [bench_ticker]))
+    all_list = list(set(tickers + ([bench_ticker] if bench_ticker != "ONE" else [])))
     interval = "1d" if tf_choice == "Daily" else "1wk"
+    
     data_fetch = yf.download(all_list, period="2y", interval=interval, group_by='ticker', progress=False)
     w_data = data_fetch if tf_choice == "Weekly" else yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
 
     history, table_data = {}, []
     for t in tickers:
-        res = get_metrics(data_fetch, t, bench_ticker)
-        w_res = get_metrics(w_data, t, bench_ticker)
+        res = get_metrics(data_fetch, t, bench_ticker, bench)
+        w_res = get_metrics(w_data, t, bench_ticker, bench)
+        
         if res is not None and not res.empty and len(res) >= 2:
             history[t] = res
             dr, dm = res['x'].iloc[-1], res['y'].iloc[-1]
             dq = get_quadrant(dr, dm)
             wq = get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1]) if (w_res is not None and not w_res.empty) else "N/A"
+            
+            # Precision 12 O'Clock Alert (Current Lead & Previous Lookback)
             cross_alert = "---"
             if len(res) > 5:
                 was_below = (res['x'].iloc[-6:-1] < 100).any()
                 if was_below and dr >= 100 and dm >= 100:
                     cross_alert = "🔥 CROSSING"
+
             status = "POWER WALK" if dr > 101.5 and dq == "WEAKENING" else \
                      "LEAD-THROUGH" if dq == "LEADING" and wq == "IMPROVING" else \
                      "BULLISH SYNC" if dq == "LEADING" and wq == "LEADING" else \
                      "DAILY PIVOT" if dq == "IMPROVING" and wq == "LAGGING" else "DIVERGED"
+            
             table_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "12 O'Clock Alert": cross_alert, "Sync Status": status, "RS-Ratio": round(dr, 2)})
     return pd.DataFrame(table_data), history
 
@@ -118,6 +137,8 @@ try:
     if not df_main.empty:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
+        
+        # Background Quadrants
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.12)", layer="below", line_width=0)
@@ -129,9 +150,11 @@ try:
             color = px.colors.qualitative.Alphabet[i % 26]
             safe_tail = min(tail_len, len(df))
             df_p = df.iloc[-safe_tail:]
+            
             fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines+markers', line=dict(color=color, width=3, shape='spline'),
                 marker=dict(size=6, color=color, opacity=0.8, line=dict(width=1, color='white')), name=f"{t}", customdata=df_p['date_str'],
                 hovertemplate=f"<b>{t}</b><br>Date: %{{customdata}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
+            
             fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', 
                 marker=dict(symbol='diamond', size=18, color=color, line=dict(width=2, color='white')), text=[t], textposition="top center", showlegend=False,
                 customdata=[[TICKER_NAMES.get(t, t), df_p['date_str'].iloc[-1]]], hovertemplate=f"<b>{t} | %{{customdata[0]}}</b><br>LATEST: %{{customdata[1]}}<br>Ratio: %{{x:.2f}}<br>Mom: %{{y:.2f}}<extra></extra>"))
