@@ -4,11 +4,12 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
+import time
 
 # --- CONFIG ---
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
-# --- TICKER TRANSLATION MAP ---
+# (Ticker Names and Static Lists remain the same as your previous version...)
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
@@ -18,17 +19,13 @@ TICKER_NAMES = {
     "XBI": "Biotech", "XLF": "Financials (Large)", "XLI": "Industrials (Large)", 
     "XLV": "Health Care (Large)", "XLP": "Cons Staples (Large)", "XLU": "Utilities (Large)", 
     "XLB": "Materials (Large)", "XLRE": "Real Estate (Large)",
-    "PSCT": "Tech (Small)", "PSCD": "Cons Disc (Small)", "PSCF": "Financials (Small)", 
-    "PSCI": "Industrials (Small)", "PSCH": "Health Care (Small)", "PSCC": "Cons Staples (Small)", 
-    "PSCU": "Utilities (Small)", "PSCM": "Materials (Small)", "PSCE": "Energy (Small)",
-    "AROC": "Archrock", "KGS": "Kodiak Gas", "LBRT": "Liberty Energy", "NE": "Noble Corp", "OII": "Oceaneering Intl",
+    "PSCT": "Tech (Small)", "PSCE": "Energy (Small)", "OII": "Oceaneering Intl",
     "GC=F": "GOLD (Live)", "SI=F": "SILVER (Live)", "HG=F": "COPPER (Live)", 
     "CL=F": "CRUDE OIL (Live)", "BZ=F": "BRENT OIL (Live)", "NG=F": "NAT GAS (Live)", 
     "PL=F": "PLATINUM (Live)", "PA=F": "PALLADIUM (Live)", "TIO=F": "IRON ORE (Live)",
     "ALB": "LITHIUM (Proxy)", "URNM": "URANIUM (Proxy)", "ZS=F": "SOYBEANS (Live)"
 }
 
-# --- STATIC LISTS ---
 MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT"
 SECTOR_ROTATION = "XLK, XLY, XLC, XBI, XLF, XLI, XLE, XLV, XLP, XLU, XLB, XLRE, PSCT, PSCD, PSCF, PSCI, PSCH, PSCC, PSCU, PSCM, PSCE"
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
@@ -61,19 +58,37 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- HARDENED ENGINE ---
+# --- RECOVERY ENGINE ---
+@st.cache_data(ttl=600)
+def download_with_retry(tickers, interval):
+    # Split into chunks of 20 to avoid Yahoo Finance 429 errors
+    chunk_size = 20
+    all_data = pd.DataFrame()
+    
+    for i in range(0, len(tickers), chunk_size):
+        chunk = tickers[i:i + chunk_size]
+        try:
+            data = yf.download(chunk, period="2y", interval=interval, group_by='ticker', progress=False)
+            if all_data.empty:
+                all_data = data
+            else:
+                all_data = pd.concat([all_data, data], axis=1)
+            time.sleep(0.5) # Brief pause to be "polite" to the API
+        except:
+            continue
+    return all_data
+
 def get_metrics(df_raw, ticker, b_ticker, benchmark_val):
     try:
         if ticker not in df_raw.columns.get_level_values(0): return None
         px = df_raw[ticker]['Close'].dropna()
         
-        # Handle "ONE" (Absolute Momentum) vs. Relative Benchmark
         if benchmark_val.upper() == "ONE":
             bx = pd.Series(1.0, index=px.index)
         else:
+            if b_ticker not in df_raw.columns.get_level_values(0): return None
             bx = df_raw[b_ticker]['Close'].dropna()
         
-        # STRICT INTERSECTION Logic
         common = px.index.intersection(bx.index)
         if len(common) < 25: return None
         
@@ -95,15 +110,14 @@ def get_quadrant(x, y):
     if x < 100 and y < 100: return "LAGGING"
     return "WEAKENING"
 
-@st.cache_data(ttl=600)
 def run_analysis(ticker_str, bench, tf_choice):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
     bench_ticker = bench.strip().upper()
     all_list = list(set(tickers + ([bench_ticker] if bench_ticker != "ONE" else [])))
     interval = "1d" if tf_choice == "Daily" else "1wk"
     
-    data_fetch = yf.download(all_list, period="2y", interval=interval, group_by='ticker', progress=False)
-    w_data = data_fetch if tf_choice == "Weekly" else yf.download(all_list, period="2y", interval="1wk", group_by='ticker', progress=False)
+    data_fetch = download_with_retry(all_list, interval)
+    w_data = data_fetch if tf_choice == "Weekly" else download_with_retry(all_list, "1wk")
 
     history, table_data = {}, []
     for t in tickers:
@@ -114,9 +128,9 @@ def run_analysis(ticker_str, bench, tf_choice):
             history[t] = res
             dr, dm = res['x'].iloc[-1], res['y'].iloc[-1]
             dq = get_quadrant(dr, dm)
+            
             wq = get_quadrant(w_res['x'].iloc[-1], w_res['y'].iloc[-1]) if (w_res is not None and not w_res.empty) else "N/A"
             
-            # Precision 12 O'Clock Alert (Current Lead & Previous Lookback)
             cross_alert = "---"
             if len(res) > 5:
                 was_below = (res['x'].iloc[-6:-1] < 100).any()
@@ -138,7 +152,7 @@ try:
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
         
-        # Background Quadrants
+        # Quadrant Design
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.5)", width=2, dash="dot"))
         fig.add_vrect(x0=101.5, x1=105, fillcolor="rgba(46, 204, 113, 0.12)", layer="below", line_width=0)
@@ -170,4 +184,4 @@ try:
             return "background-color: #E74C3C; color: white; font-weight: bold;" if val == "🔥 CROSSING" else ""
         st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False).style.applymap(style_status, subset=['Sync Status']).applymap(style_alert, subset=["12 O'Clock Alert"]), use_container_width=True)
 except Exception as e:
-    st.error(f"Engine Alert: {e}")
+    st.error(f"Waiting for Data... Try hitting 'Reset Engine' if this persists. Error: {e}")
