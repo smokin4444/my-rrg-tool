@@ -15,7 +15,6 @@ CHART_RANGE = [97.5, 102.5]
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
-# --- TICKER DICTIONARY --- (Kept Full from previous versions)
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
@@ -63,7 +62,7 @@ with st.sidebar:
     benchmark = st.text_input("Active Benchmark:", value=auto_bench)
     
     st.markdown("---")
-    timeframe = st.radio("Timeframe:", ["Daily", "Weekly", "Monthly"])
+    main_timeframe = st.radio("Display Chart Timeframe:", ["Daily", "Weekly"])
     tail_len = st.slider("Tail Length:", 2, 30, 12)
     
     if st.button("♻️ Reset Engine"):
@@ -81,7 +80,7 @@ def get_heading(x1, y1, x2, y2):
 
 @st.cache_data(ttl=600)
 def download_data(tickers, interval):
-    period = "10y" if interval == "1mo" else "2y"
+    period = "2y"
     chunk_size = 25
     dfs = []
     for i in range(0, len(tickers), chunk_size):
@@ -114,56 +113,72 @@ def get_metrics(df_raw, ticker, bench_t, is_absolute):
         return df_res
     except: return None
 
-def run_analysis(ticker_str, bench, tf):
+def get_stage(x, y):
+    if x >= 100 and y >= 100: return "LEADING"
+    if x < 100 and y >= 100: return "IMPROVING"
+    if x < 100 and y < 100: return "LAGGING"
+    return "WEAKENING"
+
+def run_dual_analysis(ticker_str, bench, tf_display):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
     bench_t = bench.strip().upper()
     is_absolute = bench_t == "ONE"
-    data = download_data(list(set(tickers + ([bench_t] if not is_absolute else []))), {"Daily": "1d", "Weekly": "1wk", "Monthly": "1mo"}[tf])
-    if data.empty: return pd.DataFrame(), {}
     
-    history, table_data = {}, []
+    # Download both Daily and Weekly datasets
+    data_d = download_data(list(set(tickers + ([bench_t] if not is_absolute else []))), "1d")
+    data_w = download_data(list(set(tickers + ([bench_t] if not is_absolute else []))), "1wk")
+    
+    if data_d.empty or data_w.empty: return pd.DataFrame(), {}
+    
+    history_display, table_data = {}, []
     for t in tickers:
-        res = get_metrics(data, t, bench_t, is_absolute)
-        if res is not None and not res.empty:
-            history[t] = res
-            dr, dm = res['x'].iloc[-1], res['y'].iloc[-1]
-            prev_dr, prev_dm = res['x'].iloc[-2], res['y'].iloc[-2]
+        res_d = get_metrics(data_d, t, bench_t, is_absolute)
+        res_w = get_metrics(data_w, t, bench_t, is_absolute)
+        
+        # We need at least the display timeframe for the chart
+        res_display = res_d if tf_display == "Daily" else res_w
+        
+        if res_display is not None and not res_display.empty:
+            history_display[t] = res_display
             
-            # 1. Heading Logic
-            heading = get_heading(prev_dr, prev_dm, dr, dm)
+            # Daily Stats
+            dr_d, dm_d = res_d['x'].iloc[-1], res_d['y'].iloc[-1]
+            stg_d = get_stage(dr_d, dm_d)
             
-            # 2. Velocity Logic (Distance traveled last bar)
-            velocity = np.sqrt((dr - prev_dr)**2 + (dm - prev_dm)**2)
+            # Weekly Stats
+            if res_w is not None and not res_w.empty:
+                dr_w, dm_w = res_w['x'].iloc[-1], res_w['y'].iloc[-1]
+                stg_w = get_stage(dr_w, dm_w)
+            else:
+                stg_w = "N/A"
             
-            # 3. Stage Logic
-            stage = "LEADING" if dr >= 100 and dm >= 100 else "IMPROVING" if dr < 100 and dm >= 100 else "LAGGING" if dr < 100 and dm < 100 else "WEAKENING"
+            # Heading & Velocity (using Display TF)
+            heading = get_heading(res_display['x'].iloc[-2], res_display['y'].iloc[-2], res_display['x'].iloc[-1], res_display['y'].iloc[-1])
+            velocity = np.sqrt((res_display['x'].iloc[-1] - res_display['x'].iloc[-2])**2 + (res_display['y'].iloc[-1] - res_display['y'].iloc[-2])**2)
             
-            # 4. Strategy Score (Weighted: Ratio + Velocity + Heading bonus)
-            score = (dr * 0.5) + (dm * 0.3) + (velocity * 2.0)
-            if "NE" in heading: score += 5
-            if "SW" in heading: score -= 5
-            
-            # 5. Alert Logic
-            alert = "🔥 NEW LEADER" if (prev_dr < 100 and dr >= 100 and dm >= 100) else "---"
-            strategy = "Overweight" if (dr > 100 and "NE" in heading) else "Watch Entry" if (stage == "IMPROVING" and "NE" in heading) else "Reduce" if ("SW" in heading) else "Neutral"
+            # Dual Sync Logic
+            sync = "💎 BULLISH SYNC" if stg_d == "LEADING" and stg_w == "LEADING" else \
+                   "📈 PULLBACK BUY" if stg_d == "IMPROVING" and stg_w == "LEADING" else \
+                   "⚠️ TACTICAL" if stg_d == "LEADING" and stg_w == "LAGGING" else "---"
             
             table_data.append({
-                "Ticker": t, "Name": TICKER_NAMES.get(t, t), "Stage": stage, "Heading": heading,
-                "Velocity": round(velocity, 2), "Rotation Score": round(score, 1),
-                "Strategy": strategy, "12 O'Clock Alert": alert, "RS-Ratio": round(dr, 2)
+                "Ticker": t, "Name": TICKER_NAMES.get(t, t), "Sync Status": sync,
+                "Daily Stage": stg_d, "Weekly Stage": stg_w, "Heading": heading,
+                "Rotation Score": round((res_display['x'].iloc[-1] * 0.5) + (velocity * 2.0), 1)
             })
-    return pd.DataFrame(table_data), history
+            
+    return pd.DataFrame(table_data), history_display
 
 # --- DISPLAY ---
 try:
-    df_main, hist = run_analysis(tickers_input, benchmark, timeframe)
+    df_main, hist = run_dual_analysis(tickers_input, benchmark, main_timeframe)
     if not df_main.empty:
         col_t1, col_t2 = st.columns([1, 4])
         with col_t1: show_all = st.checkbox("Show All Tickers", value=True)
         default_selection = list(hist.keys()) if show_all else []
         with col_t2: to_plot = st.multiselect("Active Plotters:", options=list(hist.keys()), default=default_selection)
         
-        st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
+        st.subheader(f"🌀 {main_timeframe} Chart Rotation vs {benchmark}")
         fig = go.Figure()
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
@@ -179,12 +194,15 @@ try:
         fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
         
-        # Color-coded Grid
-        st.subheader("📊 Quant Strategy Grid")
-        styled_df = df_main.sort_values(by='Rotation Score', ascending=False).style.applymap(
-            lambda x: "background-color: #2ECC71; color: white" if x == "Overweight" else "background-color: #F1C40F; color: black" if x == "Watch Entry" else "background-color: #E74C3C; color: white" if x == "Reduce" else "",
-            subset=['Strategy']
-        )
-        st.dataframe(styled_df, use_container_width=True)
+        st.subheader("📊 Dual-Timeframe Quant Grid")
+        
+        # Color-coded Grid for Sync Status
+        def color_sync(val):
+            if val == "💎 BULLISH SYNC": return "background-color: #2ECC71; color: white"
+            if val == "📈 PULLBACK BUY": return "background-color: #3498DB; color: white"
+            if val == "⚠️ TACTICAL": return "background-color: #F1C40F; color: black"
+            return ""
+
+        st.dataframe(df_main.sort_values(by='Rotation Score', ascending=False).style.applymap(color_sync, subset=['Sync Status']), use_container_width=True)
         
 except Exception as e: st.error(f"Error: {e}")
