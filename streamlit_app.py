@@ -10,7 +10,7 @@ import time
 LOOKBACK = 14
 RRG_CENTER = 100
 EPSILON = 1e-8
-Z_LIMITS = (80, 120)  # Clipping bounds for chart clarity
+Z_LIMITS = (80, 120)  
 CHART_RANGE = [97.5, 102.5]
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
@@ -69,128 +69,72 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- REFACTORED DATA ENGINE ---
+# --- DATA ENGINE ---
 @st.cache_data(ttl=600)
 def download_data(tickers, interval):
     period = "10y" if interval == "1mo" else "2y"
     chunk_size = 25
     dfs = []
-    
     for i in range(0, len(tickers), chunk_size):
         chunk = tickers[i:i + chunk_size]
         try:
             data = yf.download(chunk, period=period, interval=interval, progress=False)
-            if not data.empty:
-                dfs.append(data)
+            if not data.empty: dfs.append(data)
             time.sleep(0.5)
-        except Exception as e:
-            st.warning(f"Failed to fetch chunk: {chunk}. Error: {e}")
-            
-    if not dfs: return pd.DataFrame()
-    return pd.concat(dfs, axis=1)
+        except Exception as e: st.warning(f"Chunk error: {e}")
+    return pd.concat(dfs, axis=1) if dfs else pd.DataFrame()
 
 def get_metrics(df_raw, ticker, bench_t, is_absolute):
     try:
-        # Robust access to multi-index data
         px = df_raw['Close'][ticker].dropna()
-        if is_absolute:
-            bx = pd.Series(1.0, index=px.index)
-        else:
-            bx = df_raw['Close'][bench_t].dropna()
-        
+        bx = pd.Series(1.0, index=px.index) if is_absolute else df_raw['Close'][bench_t].dropna()
         common = px.index.intersection(bx.index)
         if len(common) < LOOKBACK + 5: return None
-        
         px_a, bx_a = px.loc[common], bx.loc[common]
         rel = (px_a / bx_a) * 100
-        
-        # Z-Score Standardisation with Epsilon Guard
         def standardize(series):
-            mean = series.rolling(LOOKBACK).mean()
-            std = series.rolling(LOOKBACK).std().replace(0, EPSILON)
-            return RRG_CENTER + ((series - mean) / std)
-
-        ratio = standardize(rel).clip(*Z_LIMITS)
-        roc = ratio.diff(1)
-        mom = standardize(roc).clip(*Z_LIMITS)
-        
-        df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
+            return RRG_CENTER + ((series - series.rolling(LOOKBACK).mean()) / series.rolling(LOOKBACK).std().replace(0, EPSILON))
+        ratio, roc = standardize(rel).clip(*Z_LIMITS), standardize(rel.diff(1)).clip(*Z_LIMITS)
+        df_res = pd.DataFrame({'x': ratio, 'y': roc, 'date': ratio.index}).dropna()
         df_res['date_str'] = df_res['date'].dt.strftime('%b %d, %Y')
+        df_res['full_name'] = TICKER_NAMES.get(ticker, ticker)
         return df_res
-    except Exception:
-        return None
-
-def get_quadrant(x, y):
-    if x >= 100 and y >= 100: return "LEADING"
-    if x < 100 and y >= 100: return "IMPROVING"
-    if x < 100 and y < 100: return "LAGGING"
-    return "WEAKENING"
+    except: return None
 
 def run_analysis(ticker_str, bench, tf):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
     bench_t = bench.strip().upper()
     is_absolute = bench_t == "ONE"
-    
-    fetch_list = list(set(tickers + ([bench_t] if not is_absolute else [])))
-    iv = {"Daily": "1d", "Weekly": "1wk", "Monthly": "1mo"}[tf]
-    
-    data = download_data(fetch_list, iv)
+    data = download_data(list(set(tickers + ([bench_t] if not is_absolute else []))), {"Daily": "1d", "Weekly": "1wk", "Monthly": "1mo"}[tf])
     if data.empty: return pd.DataFrame(), {}
-
     history, table_data = {}, []
-    valid_count = 0
-    
     for t in tickers:
         res = get_metrics(data, t, bench_t, is_absolute)
         if res is not None and not res.empty:
-            valid_count += 1
             history[t] = res
             dr, dm = res['x'].iloc[-1], res['y'].iloc[-1]
-            dq = get_quadrant(dr, dm)
-            
-            # Improved 12 O'Clock Alert (Classic RRG Logic: Ratio & Mom both crossing up)
-            alert = "---"
-            if len(res) > 2:
-                # Was in Improving (ratio < 100, mom > 100) and now both are > 100
-                if res['x'].iloc[-2] < 100 and dr >= 100 and dm >= 100:
-                    alert = "🔥 CROSSING"
-            
-            table_data.append({
-                "Ticker": t, "Name": TICKER_NAMES.get(t, t), "Quadrant": dq,
-                "12 O'Clock Alert": alert, "RS-Ratio": round(dr, 2), "RS-Mom": round(dm, 2)
-            })
-            
-    st.info(f"Analysis Complete: {len(tickers)} tickers processed. {valid_count} displayed with valid data.")
+            alert = "🔥 CROSSING" if (len(res) > 2 and res['x'].iloc[-2] < 100 and dr >= 100 and dm >= 100) else "---"
+            table_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Quadrant": "LEADING" if dr >= 100 and dm >= 100 else "IMPROVING" if dr < 100 and dm >= 100 else "LAGGING" if dr < 100 and dm < 100 else "WEAKENING", "12 O'Clock Alert": alert, "RS-Ratio": round(dr, 2), "RS-Mom": round(dm, 2)})
     return pd.DataFrame(table_data), history
 
 # --- DISPLAY ---
 try:
     df_main, hist = run_analysis(tickers_input, benchmark, timeframe)
     if not df_main.empty:
-        # Multiselect Filter for UX
-        to_plot = st.multiselect("Filter Tickers to Plot:", options=list(hist.keys()), default=list(hist.keys())[:20])
-        
+        to_plot = st.multiselect("Active Plotters:", options=list(hist.keys()), default=list(hist.keys())[:20])
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
-        
-        # Grid Design
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
-
         for i, t in enumerate(to_plot):
             df = hist[t]
             color = px.colors.qualitative.Alphabet[i % 26]
             df_p = df.iloc[-min(tail_len, len(df)):]
-            
-            # Tail
-            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines+markers', line=dict(color=color, width=2.5, shape='spline'), name=t, customdata=df_p['date_str'], hovertemplate="<b>%{name}</b><br>%{customdata}<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>"))
-            # Head
-            fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=15, color=color, line=dict(width=1, color='white')), text=[t], textposition="top center", showlegend=False))
-            
+            # The logic that brings back the full name:
+            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2, shape='spline'), showlegend=False, hoverinfo='skip'))
+            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='markers', marker=dict(size=4, color=color, opacity=0.4), name=t, customdata=np.stack((df_p['date_str'], df_p['full_name']), axis=-1), hovertemplate="<b>%{name} | %{customdata[1]}</b><br>%{customdata[0]}<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>"))
+            fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), text=[t], textposition="top center", name=t, customdata=np.stack(([df_p['date_str'].iloc[-1]], [df_p['full_name'].iloc[-1]]), axis=-1), hovertemplate="<b>%{name} | %{customdata[1]}</b><br>LATEST<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>", showlegend=False))
         fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
-        
-        st.subheader("📊 Alpha Grid")
         st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False), use_container_width=True)
-except Exception as e:
-    st.error(f"Engine Failure: {e}")
+except Exception as e: st.error(f"Error: {e}")
