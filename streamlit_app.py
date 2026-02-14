@@ -15,6 +15,7 @@ CHART_RANGE = [97.5, 102.5]
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
+# --- TICKER DICTIONARY --- (Kept Full from previous versions)
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
@@ -42,11 +43,7 @@ TICKER_NAMES = {
 }
 
 # --- WATCHLISTS ---
-TV_INDUSTRIES_FULL = (
-    "XES, OIH, FLR, EVX, AMLP, VTI, TTD, VPP, SPGI, MAN, WSC, SYY, AVT, MCK, FI, ACN, IGV, FDN, "
-    "UNH, THC, HCA, IQV, DIS, NXST, CHTR, NYT, EATZ, CRUZ, BETZ, PEJ, KR, CVS, M, WMT, NKE, HD, BBY, TSCO, ONLN, IYT, XLU, XLF, IYZ, XLI, VAW, SMH, IBB, XHB, XLP, XRT"
-)
-
+TV_INDUSTRIES_FULL = "XES, OIH, FLR, EVX, AMLP, VTI, TTD, VPP, SPGI, MAN, WSC, SYY, AVT, MCK, FI, ACN, IGV, FDN, UNH, THC, HCA, IQV, DIS, NXST, CHTR, NYT, EATZ, CRUZ, BETZ, PEJ, KR, CVS, M, WMT, NKE, HD, BBY, TSCO, ONLN, IYT, XLU, XLF, IYZ, XLI, VAW, SMH, IBB, XHB, XLP, XRT"
 MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT"
 SECTOR_ROTATION = "XLK, IGV, XLY, XLC, XBI, XLF, XLI, XLE, XLV, IHE, XLP, XLU, XLB, XLRE, PSCT, PSCD, PSCF, PSCI, PSCH, PSCC, PSCU, PSCM, PSCE"
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
@@ -60,7 +57,7 @@ with st.sidebar:
     heap_type = st.radio("Choose Group:", ["Major Themes", "Sector Rotation", "Energy Torque", "Startup", "Tech Themes", "Hard Assets (Live)", "TV Industries (Full)", "Single/Custom"])
     
     current_list = {"Major Themes": MAJOR_THEMES, "Sector Rotation": SECTOR_ROTATION, "Energy Torque": ENERGY_TORQUE, "Startup": STARTUP_THEMES, "Tech Themes": TECH_THEMES, "Hard Assets (Live)": HARD_ASSETS_LIVE, "TV Industries (Full)": TV_INDUSTRIES_FULL, "Single/Custom": ""}.get(heap_type)
-    auto_bench = "ONE" if heap_type == "Hard Assets (Live)" else "QQQ" if heap_type == "Tech Themes" else "SPY"
+    auto_bench = "ONE" if heap_type == "Hard Assets (Live)" else "SPY"
     
     tickers_input = st.text_area("Ticker Heap:", value=current_list, height=150)
     benchmark = st.text_input("Active Benchmark:", value=auto_bench)
@@ -73,7 +70,15 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- DATA ENGINE ---
+# --- ANALYTICS ENGINES ---
+def get_heading(x1, y1, x2, y2):
+    dx, dy = x2 - x1, y2 - y1
+    if dx > 0 and dy > 0: return "NE ↗️"
+    if dx < 0 and dy > 0: return "NW ↖️"
+    if dx < 0 and dy < 0: return "SW ↙️"
+    if dx > 0 and dy < 0: return "SE ↘️"
+    return "Neutral"
+
 @st.cache_data(ttl=600)
 def download_data(tickers, interval):
     period = "10y" if interval == "1mo" else "2y"
@@ -96,10 +101,14 @@ def get_metrics(df_raw, ticker, bench_t, is_absolute):
         if len(common) < LOOKBACK + 5: return None
         px_a, bx_a = px.loc[common], bx.loc[common]
         rel = (px_a / bx_a) * 100
+        
         def standardize(series):
             return RRG_CENTER + ((series - series.rolling(LOOKBACK).mean()) / series.rolling(LOOKBACK).std().replace(0, EPSILON))
-        ratio, roc = standardize(rel).clip(*Z_LIMITS), standardize(rel.diff(1)).clip(*Z_LIMITS)
-        df_res = pd.DataFrame({'x': ratio, 'y': roc, 'date': ratio.index}).dropna()
+        
+        ratio = standardize(rel).clip(*Z_LIMITS)
+        mom = standardize(rel.diff(1)).clip(*Z_LIMITS)
+        
+        df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         df_res['date_str'] = df_res['date'].dt.strftime('%b %d, %Y')
         df_res['full_name'] = TICKER_NAMES.get(ticker, ticker)
         return df_res
@@ -111,14 +120,38 @@ def run_analysis(ticker_str, bench, tf):
     is_absolute = bench_t == "ONE"
     data = download_data(list(set(tickers + ([bench_t] if not is_absolute else []))), {"Daily": "1d", "Weekly": "1wk", "Monthly": "1mo"}[tf])
     if data.empty: return pd.DataFrame(), {}
+    
     history, table_data = {}, []
     for t in tickers:
         res = get_metrics(data, t, bench_t, is_absolute)
         if res is not None and not res.empty:
             history[t] = res
             dr, dm = res['x'].iloc[-1], res['y'].iloc[-1]
-            alert = "🔥 CROSSING" if (len(res) > 2 and res['x'].iloc[-2] < 100 and dr >= 100 and dm >= 100) else "---"
-            table_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Quadrant": "LEADING" if dr >= 100 and dm >= 100 else "IMPROVING" if dr < 100 and dm >= 100 else "LAGGING" if dr < 100 and dm < 100 else "WEAKENING", "12 O'Clock Alert": alert, "RS-Ratio": round(dr, 2), "RS-Mom": round(dm, 2)})
+            prev_dr, prev_dm = res['x'].iloc[-2], res['y'].iloc[-2]
+            
+            # 1. Heading Logic
+            heading = get_heading(prev_dr, prev_dm, dr, dm)
+            
+            # 2. Velocity Logic (Distance traveled last bar)
+            velocity = np.sqrt((dr - prev_dr)**2 + (dm - prev_dm)**2)
+            
+            # 3. Stage Logic
+            stage = "LEADING" if dr >= 100 and dm >= 100 else "IMPROVING" if dr < 100 and dm >= 100 else "LAGGING" if dr < 100 and dm < 100 else "WEAKENING"
+            
+            # 4. Strategy Score (Weighted: Ratio + Velocity + Heading bonus)
+            score = (dr * 0.5) + (dm * 0.3) + (velocity * 2.0)
+            if "NE" in heading: score += 5
+            if "SW" in heading: score -= 5
+            
+            # 5. Alert Logic
+            alert = "🔥 NEW LEADER" if (prev_dr < 100 and dr >= 100 and dm >= 100) else "---"
+            strategy = "Overweight" if (dr > 100 and "NE" in heading) else "Watch Entry" if (stage == "IMPROVING" and "NE" in heading) else "Reduce" if ("SW" in heading) else "Neutral"
+            
+            table_data.append({
+                "Ticker": t, "Name": TICKER_NAMES.get(t, t), "Stage": stage, "Heading": heading,
+                "Velocity": round(velocity, 2), "Rotation Score": round(score, 1),
+                "Strategy": strategy, "12 O'Clock Alert": alert, "RS-Ratio": round(dr, 2)
+            })
     return pd.DataFrame(table_data), history
 
 # --- DISPLAY ---
@@ -126,13 +159,9 @@ try:
     df_main, hist = run_analysis(tickers_input, benchmark, timeframe)
     if not df_main.empty:
         col_t1, col_t2 = st.columns([1, 4])
-        with col_t1:
-            show_all = st.checkbox("Show All Tickers", value=True)
-        
+        with col_t1: show_all = st.checkbox("Show All Tickers", value=True)
         default_selection = list(hist.keys()) if show_all else []
-        
-        with col_t2:
-            to_plot = st.multiselect("Active Plotters:", options=list(hist.keys()), default=default_selection)
+        with col_t2: to_plot = st.multiselect("Active Plotters:", options=list(hist.keys()), default=default_selection)
         
         st.subheader(f"🌀 {timeframe} Rotation vs {benchmark}")
         fig = go.Figure()
@@ -149,5 +178,13 @@ try:
         
         fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(df_main.sort_values(by='RS-Ratio', ascending=False), use_container_width=True)
+        
+        # Color-coded Grid
+        st.subheader("📊 Quant Strategy Grid")
+        styled_df = df_main.sort_values(by='Rotation Score', ascending=False).style.applymap(
+            lambda x: "background-color: #2ECC71; color: white" if x == "Overweight" else "background-color: #F1C40F; color: black" if x == "Watch Entry" else "background-color: #E74C3C; color: white" if x == "Reduce" else "",
+            subset=['Strategy']
+        )
+        st.dataframe(styled_df, use_container_width=True)
+        
 except Exception as e: st.error(f"Error: {e}")
