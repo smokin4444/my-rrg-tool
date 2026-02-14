@@ -13,22 +13,38 @@ st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
-    "GLD": "Gold", "SLV": "Silver", "COPX": "Copper Miners", "XLE": "Energy Minerals",
+    "GLD": "Gold", "SLV": "Silver", "COPX": "Copper Miners", "XLE": "Energy",
     "XLK": "Technology", "XLY": "Consumer Durables", "XLC": "Communications", 
     "XLF": "Finance", "XLI": "Producer Manufacturing", 
     "XLV": "Health Services", "XLP": "Cons Non-Durables", "XLU": "Utilities", 
     "XLB": "Materials (Broad)", "IYT": "Transportation", "PICK": "Non-Energy Minerals", 
-    "URNM": "Energy Minerals (Uranium)", "OII": "Industrial Services", "VAW": "Process Industries", 
-    "SMH": "Electronic Technology", "IGV": "Technology Services", 
-    "IBB": "Health Technology", "XHB": "Consumer Durables", "PEJ": "Consumer Services", 
-    "XRT": "Retail Trade", "IYZ": "Communications", "VNQ": "Investment Trusts",
-    "VTI": "Miscellaneous/Broad", "IBIT": "Bitcoin Trust", "FAST": "Distribution", "IHE": "Health Technology (Pharma)"
+    "URNM": "Energy Minerals", "OII": "Industrial Services", "VAW": "Process Industries", 
+    "SMH": "Electronic Tech", "IGV": "Tech Services", "IBB": "Health Tech", "XHB": "Cons. Durables",
+    "PEJ": "Consumer Services", "XRT": "Retail Trade", "IYZ": "Communications", "VNQ": "Invest Trusts",
+    "VTI": "Misc/Broad", "IBIT": "Bitcoin Trust", "FAST": "Distribution", "IHE": "Pharma",
+    "XES": "Contract Drilling", "OIH": "Oilfield Services", "FLR": "Eng. & Construction",
+    "EVX": "Environmental Svcs", "AMLP": "Pipelines", "TTD": "Ad-Tech/Marketing",
+    "VPP": "Commercial Printing", "SPGI": "Financial Services", "MAN": "Personnel Services",
+    "WSC": "Wholesale Dist.", "SYY": "Food Distribution", "AVT": "Electronics Dist.",
+    "MCK": "Medical Distribution", "FI": "Data Processing", "ACN": "IT Services",
+    "FDN": "Internet Services", "UNH": "Managed Health", "THC": "Hospital Mgmt",
+    "HCA": "Medical Services", "IQV": "Health Industry Svcs", "DIS": "Media Conglomerate",
+    "NXST": "Broadcasting", "CHTR": "Cable/Satellite TV", "NYT": "Publishing",
+    "EATZ": "Restaurants", "CRUZ": "Hotels/Cruises", "BETZ": "Casinos/Gaming",
+    "KR": "Food Retail", "CVS": "Drugstore Chains", "M": "Department Stores",
+    "WMT": "Discount Stores", "NKE": "Apparel Retail", "HD": "Home Improvement",
+    "BBY": "Electronics Stores", "TSCO": "Specialty Stores", "ONLN": "Internet Retail"
 }
 
 # --- WATCHLISTS ---
+# Consolidated list of all 42 requested industries
+TV_INDUSTRIES_FULL = (
+    "XES, OIH, FLR, EVX, AMLP, VTI, TTD, VPP, SPGI, MAN, WSC, SYY, AVT, MCK, FI, ACN, IGV, FDN, "
+    "UNH, THC, HCA, IQV, DIS, NXST, CHTR, NYT, EATZ, CRUZ, BETZ, PEJ, KR, CVS, M, WMT, NKE, HD, BBY, TSCO, ONLN, IYT, XLU, XLF, IYZ, XLI, VAW, SMH, IBB, XHB, XLP, XRT"
+)
+
 MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT"
 SECTOR_ROTATION = "XLK, IGV, XLY, XLC, XBI, XLF, XLI, XLE, XLV, IHE, XLP, XLU, XLB, XLRE, PSCT, PSCD, PSCF, PSCI, PSCH, PSCC, PSCU, PSCM, PSCE"
-TV_FULL_INDUSTRIES = "PICK, URNM, OII, IYT, XLU, XLF, IYZ, VTI, VNQ, XLI, VAW, SMH, IBB, IGV, XLV, XHB, XLP, PEJ, XRT, FAST, IHE"
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
 STARTUP_THEMES = "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
 TECH_THEMES = "AIQ, SMH, SOXX, SETM, URNM, VST, BOTZ, HOOD, IBIT, LUNR, QTUM, AVAV, LIT, IGV"
@@ -46,7 +62,7 @@ with st.sidebar:
     elif heap_type == "Startup": current_list, auto_bench = STARTUP_THEMES, "SPY"
     elif heap_type == "Tech Themes": current_list, auto_bench = TECH_THEMES, "QQQ"
     elif heap_type == "Hard Assets (Live)": current_list, auto_bench = HARD_ASSETS_LIVE, "ONE"
-    elif heap_type == "TV Industries (Full)": current_list, auto_bench = TV_FULL_INDUSTRIES, "SPY"
+    elif heap_type == "TV Industries (Full)": current_list, auto_bench = TV_INDUSTRIES_FULL, "SPY"
     elif heap_type == "Single/Custom": current_list, auto_bench = CUSTOM_LIST, "SPY"
     
     tickers_input = st.text_area("Ticker Heap:", value=current_list, height=150)
@@ -60,18 +76,18 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- ANALYSIS ENGINE ---
+# --- ROBUST DOWNLOAD ENGINE ---
 @st.cache_data(ttl=600)
 def download_data(tickers, interval):
     period = "10y" if interval == "1mo" else "2y"
-    chunk_size = 15 # Smaller chunks for higher stability
+    chunk_size = 15 # Optimized for stability
     all_df = pd.DataFrame()
     for i in range(0, len(tickers), chunk_size):
         chunk = tickers[i:i + chunk_size]
         try:
             data = yf.download(chunk, period=period, interval=interval, group_by='ticker', progress=False)
             all_df = data if all_df.empty else pd.concat([all_df, data], axis=1)
-            time.sleep(0.7) # Slightly longer pause for TV peak hours
+            time.sleep(1.0) # Polite pause
         except: continue
     return all_df
 
@@ -84,7 +100,7 @@ def get_metrics(df_raw, ticker, b_ticker, bench_val):
             if b_ticker not in df_raw.columns.get_level_values(0): return None
             bx = df_raw[b_ticker]['Close'].dropna()
         common = px.index.intersection(bx.index)
-        if len(common) < 20: return None 
+        if len(common) < 25: return None 
         px_a, bx_a = px.loc[common], bx.loc[common]
         rel = (px_a / bx_a) * 100
         ratio = 100 + ((rel - rel.rolling(14).mean()) / rel.rolling(14).std())
