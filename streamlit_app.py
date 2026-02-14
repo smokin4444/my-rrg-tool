@@ -38,7 +38,11 @@ TICKER_NAMES = {
     "EATZ": "Restaurants", "CRUZ": "Hotels/Cruises", "BETZ": "Casinos/Gaming",
     "KR": "Food Retail", "CVS": "Drugstore Chains", "M": "Department Stores",
     "WMT": "Discount Stores", "NKE": "Apparel Retail", "HD": "Home Improvement",
-    "BBY": "Electronics Stores", "TSCO": "Specialty Stores", "ONLN": "Internet Retail"
+    "BBY": "Electronics Stores", "TSCO": "Specialty Stores", "ONLN": "Internet Retail",
+    "PSCT": "Tech (Small Cap)", "PSCD": "Cons Disc (Small Cap)", "PSCF": "Financials (Small Cap)", 
+    "PSCI": "Industrials (Small Cap)", "PSCH": "Health Care (Small Cap)", "PSCC": "Cons Staples (Small Cap)", 
+    "PSCU": "Utilities (Small Cap)", "PSCM": "Materials (Small Cap)", "PSCE": "Energy (Small Cap)",
+    "XLRE": "Real Estate (Large Cap)", "XBI": "Biotech (S&P)"
 }
 
 # --- WATCHLISTS ---
@@ -124,7 +128,6 @@ def run_dual_analysis(ticker_str, bench, tf_display):
     bench_t = bench.strip().upper()
     is_absolute = bench_t == "ONE"
     
-    # Download both Daily and Weekly datasets
     data_d = download_data(list(set(tickers + ([bench_t] if not is_absolute else []))), "1d")
     data_w = download_data(list(set(tickers + ([bench_t] if not is_absolute else []))), "1wk")
     
@@ -134,35 +137,31 @@ def run_dual_analysis(ticker_str, bench, tf_display):
     for t in tickers:
         res_d = get_metrics(data_d, t, bench_t, is_absolute)
         res_w = get_metrics(data_w, t, bench_t, is_absolute)
-        
-        # We need at least the display timeframe for the chart
         res_display = res_d if tf_display == "Daily" else res_w
         
         if res_display is not None and not res_display.empty:
             history_display[t] = res_display
-            
-            # Daily Stats
             dr_d, dm_d = res_d['x'].iloc[-1], res_d['y'].iloc[-1]
             stg_d = get_stage(dr_d, dm_d)
             
-            # Weekly Stats
             if res_w is not None and not res_w.empty:
                 dr_w, dm_w = res_w['x'].iloc[-1], res_w['y'].iloc[-1]
                 stg_w = get_stage(dr_w, dm_w)
             else:
                 stg_w = "N/A"
             
-            # Heading & Velocity (using Display TF)
             heading = get_heading(res_display['x'].iloc[-2], res_display['y'].iloc[-2], res_display['x'].iloc[-1], res_display['y'].iloc[-1])
             velocity = np.sqrt((res_display['x'].iloc[-1] - res_display['x'].iloc[-2])**2 + (res_display['y'].iloc[-1] - res_display['y'].iloc[-2])**2)
             
-            # Dual Sync Logic
             sync = "💎 BULLISH SYNC" if stg_d == "LEADING" and stg_w == "LEADING" else \
                    "📈 PULLBACK BUY" if stg_d == "IMPROVING" and stg_w == "LEADING" else \
                    "⚠️ TACTICAL" if stg_d == "LEADING" and stg_w == "LAGGING" else "---"
             
+            # This is where the Full Name is mapped to the table column
+            full_name_label = TICKER_NAMES.get(t, t)
+            
             table_data.append({
-                "Ticker": t, "Name": TICKER_NAMES.get(t, t), "Sync Status": sync,
+                "Ticker": t, "Full Name": full_name_label, "Sync Status": sync,
                 "Daily Stage": stg_d, "Weekly Stage": stg_w, "Heading": heading,
                 "Rotation Score": round((res_display['x'].iloc[-1] * 0.5) + (velocity * 2.0), 1)
             })
@@ -196,7 +195,6 @@ try:
         
         st.subheader("📊 Dual-Timeframe Quant Grid")
         
-        # Color-coded Grid for Sync Status
         def color_sync(val):
             if val == "💎 BULLISH SYNC": return "background-color: #2ECC71; color: white"
             if val == "📈 PULLBACK BUY": return "background-color: #3498DB; color: white"
