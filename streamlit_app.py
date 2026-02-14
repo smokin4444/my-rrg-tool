@@ -13,27 +13,22 @@ st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
-    "IJR": "Small Cap Core", "GLD": "Gold", "SLV": "Silver", "COPX": "Copper Miners", 
-    "XLE": "Energy Sector", "IBIT": "iShares Bitcoin Trust", 
-    "XLK": "Tech (Large)", "XLY": "Cons Disc (Large)", "XLC": "Comm (Large)", 
-    "XBI": "Biotech", "XLF": "Financials (Large)", "XLI": "Industrials (Large)", 
-    "XLV": "Health Care (Large)", "XLP": "Cons Staples (Large)", "XLU": "Utilities (Large)", 
-    "XLB": "Materials (Large)", "XLRE": "Real Estate (Large)",
-    "IHE": "Pharma (U.S.)", "IGV": "Software (Tech-Heavy)",
-    "PSCT": "Tech (Small)", "PSCE": "Energy (Small)", "OII": "Oceaneering Intl",
-    "GC=F": "GOLD (Live)", "SI=F": "SILVER (Live)", "HG=F": "COPPER (Live)", 
-    "CL=F": "CRUDE OIL (Live)", "BZ=F": "BRENT OIL (Live)", "NG=F": "NAT GAS (Live)", 
-    "PL=F": "PLATINUM (Live)", "PA=F": "PALLADIUM (Live)", "TIO=F": "IRON ORE (Live)",
-    "ALB": "LITHIUM (Proxy)", "URNM": "URANIUM (Proxy)", "ZS=F": "SOYBEANS (Live)",
-    "DBC": "Broad Commodities", "PICK": "Metal Miners", "DBB": "Base Metals"
+    "GLD": "Gold", "SLV": "Silver", "COPX": "Copper Miners", "XLE": "Energy Minerals",
+    "XLK": "Technology", "XLY": "Consumer Durables", "XLC": "Communications", 
+    "XLF": "Finance", "XLI": "Producer Manufacturing", 
+    "XLV": "Health Services", "XLP": "Cons Non-Durables", "XLU": "Utilities", 
+    "XLB": "Materials (Broad)", "IYT": "Transportation", "PICK": "Non-Energy Minerals", 
+    "URNM": "Energy Minerals (Uranium)", "OII": "Industrial Services", "VAW": "Process Industries", 
+    "SMH": "Electronic Technology", "IGV": "Technology Services", 
+    "IBB": "Health Technology", "XHB": "Consumer Durables", "PEJ": "Consumer Services", 
+    "XRT": "Retail Trade", "IYZ": "Communications", "VNQ": "Investment Trusts",
+    "VTI": "Miscellaneous/Broad", "IBIT": "Bitcoin Trust", "FAST": "Distribution", "IHE": "Health Technology (Pharma)"
 }
 
-# --- STATIC LISTS ---
+# --- WATCHLISTS ---
 MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT"
-
-# Added IHE and IGV to the main rotation flow
 SECTOR_ROTATION = "XLK, IGV, XLY, XLC, XBI, XLF, XLI, XLE, XLV, IHE, XLP, XLU, XLB, XLRE, PSCT, PSCD, PSCF, PSCI, PSCH, PSCC, PSCU, PSCM, PSCE"
-
+TV_FULL_INDUSTRIES = "PICK, URNM, OII, IYT, XLU, XLF, IYZ, VTI, VNQ, XLI, VAW, SMH, IBB, IGV, XLV, XHB, XLP, PEJ, XRT, FAST, IHE"
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
 STARTUP_THEMES = "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
 TECH_THEMES = "AIQ, SMH, SOXX, SETM, URNM, VST, BOTZ, HOOD, IBIT, LUNR, QTUM, AVAV, LIT, IGV"
@@ -41,10 +36,9 @@ HARD_ASSETS_LIVE = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, 
 CUSTOM_LIST = ""
 
 # --- SIDEBAR & ENGINE ---
-# (Using the same robust logic from previous version...)
 with st.sidebar:
     st.header("🎯 Watchlist")
-    heap_type = st.radio("Choose Group:", ["Major Themes", "Sector Rotation", "Energy Torque", "Startup", "Tech Themes", "Hard Assets (Live)", "Single/Custom"])
+    heap_type = st.radio("Choose Group:", ["Major Themes", "Sector Rotation", "Energy Torque", "Startup", "Tech Themes", "Hard Assets (Live)", "TV Industries (Full)", "Single/Custom"])
     
     if heap_type == "Major Themes": current_list, auto_bench = MAJOR_THEMES, "SPY"
     elif heap_type == "Sector Rotation": current_list, auto_bench = SECTOR_ROTATION, "SPY"
@@ -52,6 +46,7 @@ with st.sidebar:
     elif heap_type == "Startup": current_list, auto_bench = STARTUP_THEMES, "SPY"
     elif heap_type == "Tech Themes": current_list, auto_bench = TECH_THEMES, "QQQ"
     elif heap_type == "Hard Assets (Live)": current_list, auto_bench = HARD_ASSETS_LIVE, "ONE"
+    elif heap_type == "TV Industries (Full)": current_list, auto_bench = TV_FULL_INDUSTRIES, "SPY"
     elif heap_type == "Single/Custom": current_list, auto_bench = CUSTOM_LIST, "SPY"
     
     tickers_input = st.text_area("Ticker Heap:", value=current_list, height=150)
@@ -69,14 +64,14 @@ with st.sidebar:
 @st.cache_data(ttl=600)
 def download_data(tickers, interval):
     period = "10y" if interval == "1mo" else "2y"
-    chunk_size = 20
+    chunk_size = 15 # Smaller chunks for higher stability
     all_df = pd.DataFrame()
     for i in range(0, len(tickers), chunk_size):
         chunk = tickers[i:i + chunk_size]
         try:
             data = yf.download(chunk, period=period, interval=interval, group_by='ticker', progress=False)
             all_df = data if all_df.empty else pd.concat([all_df, data], axis=1)
-            time.sleep(0.5)
+            time.sleep(0.7) # Slightly longer pause for TV peak hours
         except: continue
     return all_df
 
