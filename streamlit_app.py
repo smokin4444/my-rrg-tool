@@ -11,7 +11,9 @@ LOOKBACK = 14
 RRG_CENTER = 100
 EPSILON = 1e-8
 Z_LIMITS = (80, 120)  
-CHART_RANGE = [97.5, 102.5]
+# Zoomed out the default view as requested
+CHART_RANGE = [96.5, 103.5] 
+POWER_WALK_LEVEL = 101.5
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
@@ -155,8 +157,14 @@ try:
         
         st.subheader(f"🌀 {main_timeframe} Chart Rotation vs {benchmark}")
         fig = go.Figure()
+        
+        # Quadrant Lines
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
+        
+        # Re-adding the Power Walk Zone
+        fig.add_shape(type="line", x0=POWER_WALK_LEVEL, y0=0, x1=POWER_WALK_LEVEL, y1=200, line=dict(color="rgba(46, 204, 113, 0.4)", dash="dash", width=2))
+        fig.add_annotation(x=POWER_WALK_LEVEL, y=103, text="<b>POWER WALK ZONE</b>", showarrow=False, font=dict(color="#27ae60", size=10))
         
         for i, t in enumerate(to_plot):
             df = hist[t]
