@@ -15,6 +15,22 @@ CHART_RANGE = [97.5, 102.5]
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
+# --- ICON MAPPING ---
+ICONS = {
+    "XLE": "🛢️", "CL=F": "🛢️", "BZ=F": "🛢️", # Oil
+    "GLD": "📀", "GC=F": "📀",            # Gold
+    "SLV": "🥈", "SI=F": "🥈",            # Silver
+    "COPX": "🏗️", "HG=F": "🏗️",           # Copper/Construction
+    "UUP": "💵",                           # Dollar
+    "TLT": "📉",                           # Bonds (Rates)
+    "ARKK": "🚀",                          # Innovation/High Beta
+    "IBIT": "₿",                           # Bitcoin
+    "SPY": "🇺🇸", "QQQ": "💻", "DIA": "🏢",  # Indices
+    "XLP": "🛒", "XLRE": "🏠", "IGV": "💾", # Staples, RE, Software
+    "URNM": "☢️",                          # Uranium
+    "ALB": "🔋",                           # Lithium/Battery
+}
+
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
@@ -42,13 +58,12 @@ TICKER_NAMES = {
     "PSCT": "Tech (Small Cap)", "PSCD": "Cons Disc (Small Cap)", "PSCF": "Financials (Small Cap)", 
     "PSCI": "Industrials (Small Cap)", "PSCH": "Health Care (Small Cap)", "PSCC": "Cons Staples (Small Cap)", 
     "PSCU": "Utilities (Small Cap)", "PSCM": "Materials (Small Cap)", "PSCE": "Energy (Small Cap)",
-    "XLRE": "Real Estate", "XBI": "Biotech (S&P)", "ARKK": "Innovation (High Beta)", "TLT": "20+Y Treasury Bonds"
+    "XLRE": "Real Estate", "XBI": "Biotech (S&P)", "ARKK": "Innovation (High Beta)", 
+    "TLT": "20+Y Treasury Bonds", "UUP": "US Dollar Index (Bullish)"
 }
 
 # --- WATCHLISTS ---
-# Major Themes now updated with ARKK and TLT
-MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT"
-
+MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT, UUP"
 TV_INDUSTRIES_FULL = "XES, OIH, FLR, EVX, AMLP, VTI, TTD, VPP, SPGI, MAN, WSC, SYY, AVT, MCK, FI, ACN, IGV, FDN, UNH, THC, HCA, IQV, DIS, NXST, CHTR, NYT, EATZ, CRUZ, BETZ, PEJ, KR, CVS, M, WMT, NKE, HD, BBY, TSCO, ONLN, IYT, XLU, XLF, IYZ, XLI, VAW, SMH, IBB, XHB, XLP, XRT"
 SECTOR_ROTATION = "XLK, IGV, XLY, XLC, XBI, XLF, XLI, XLE, XLV, IHE, XLP, XLU, XLB, XLRE, PSCT, PSCD, PSCF, PSCI, PSCH, PSCC, PSCU, PSCM, PSCE"
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
@@ -185,9 +200,35 @@ try:
             df = hist[t]
             color = px.colors.qualitative.Alphabet[i % 26]
             df_p = df.iloc[-min(tail_len, len(df)):]
+            
+            # Icon Logic: Swap Diamond for Emoji
+            icon = ICONS.get(t, "📍")
+            
             fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2, shape='spline'), showlegend=False, hoverinfo='skip'))
             fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='markers', marker=dict(size=4, color=color, opacity=0.4), name=t, customdata=np.stack((df_p['date_str'], df_p['full_name']), axis=-1), hovertemplate="<b>%{name} | %{customdata[1]}</b><br>%{customdata[0]}<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>"))
-            fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), text=[t], textposition="top center", name=t, customdata=np.stack(([df_p['date_str'].iloc[-1]], [df_p['full_name'].iloc[-1]]), axis=-1), hovertemplate="<b>%{name} | %{customdata[1]}</b><br>LATEST<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>", showlegend=False))
+            
+            # The "Icon Head"
+            fig.add_trace(go.Scatter(
+                x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], 
+                mode='text+markers', 
+                marker=dict(size=1, color=color), # Small invisible marker
+                text=[f"<b>{icon}</b>"], # The Emoji
+                textfont=dict(size=20),
+                textposition="middle center",
+                name=t, customdata=np.stack(([df_p['date_str'].iloc[-1]], [df_p['full_name'].iloc[-1]]), axis=-1), 
+                hovertemplate="<b>%{name} | %{customdata[1]}</b><br>LATEST<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>", 
+                showlegend=False
+            ))
+            
+            # Add ticker label offset slightly above icon
+            fig.add_trace(go.Scatter(
+                x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], 
+                mode='text',
+                text=[f"<b>{t}</b>"],
+                textposition="top center",
+                textfont=dict(size=10, color="black"),
+                showlegend=False, hoverinfo='skip'
+            ))
         
         fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
