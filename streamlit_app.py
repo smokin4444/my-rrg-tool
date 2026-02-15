@@ -17,18 +17,18 @@ st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
 # --- ICON MAPPING ---
 ICONS = {
-    "XLE": "🛢️", "CL=F": "🛢️", "BZ=F": "🛢️", # Oil
-    "GLD": "📀", "GC=F": "📀",            # Gold
-    "SLV": "🥈", "SI=F": "🥈",            # Silver
-    "COPX": "🏗️", "HG=F": "🏗️",           # Copper/Construction
-    "UUP": "💵",                           # Dollar
-    "TLT": "📉",                           # Bonds (Rates)
-    "ARKK": "🚀",                          # Innovation/High Beta
-    "IBIT": "₿",                           # Bitcoin
-    "SPY": "🇺🇸", "QQQ": "💻", "DIA": "🏢",  # Indices
-    "XLP": "🛒", "XLRE": "🏠", "IGV": "💾", # Staples, RE, Software
-    "URNM": "☢️",                          # Uranium
-    "ALB": "🔋",                           # Lithium/Battery
+    "XLE": "🛢️", "CL=F": "🛢️", "BZ=F": "🛢️", 
+    "GLD": "📀", "GC=F": "📀",            
+    "SLV": "🥈", "SI=F": "🥈",            
+    "COPX": "🏗️", "HG=F": "🏗️",           
+    "UUP": "💵",                           
+    "TLT": "📉",                           
+    "ARKK": "🚀",                          
+    "IBIT": "₿",                           
+    "SPY": "🇺🇸", "QQQ": "💻", "DIA": "🏢",  
+    "XLP": "🛒", "XLRE": "🏠", "IGV": "💾", 
+    "URNM": "☢️",                          
+    "ALB": "🔋",                           
 }
 
 TICKER_NAMES = {
@@ -164,8 +164,7 @@ def run_dual_analysis(ticker_str, bench, tf_display):
             if res_w is not None and not res_w.empty:
                 dr_w, dm_w = res_w['x'].iloc[-1], res_w['y'].iloc[-1]
                 stg_w = get_stage(dr_w, dm_w)
-            else:
-                stg_w = "N/A"
+            else: stg_w = "N/A"
             
             heading = get_heading(res_display['x'].iloc[-2], res_display['y'].iloc[-2], res_display['x'].iloc[-1], res_display['y'].iloc[-1])
             velocity = np.sqrt((res_display['x'].iloc[-1] - res_display['x'].iloc[-2])**2 + (res_display['y'].iloc[-1] - res_display['y'].iloc[-2])**2)
@@ -193,44 +192,39 @@ try:
         
         st.subheader(f"🌀 {main_timeframe} Chart Rotation vs {benchmark}")
         fig = go.Figure()
-        fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
-        fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
+        
+        # Quadrant Lines
+        fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.1)", dash="dot"))
+        fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.1)", dash="dot"))
         
         for i, t in enumerate(to_plot):
             df = hist[t]
             color = px.colors.qualitative.Alphabet[i % 26]
             df_p = df.iloc[-min(tail_len, len(df)):]
             
-            # Icon Logic: Swap Diamond for Emoji
             icon = ICONS.get(t, "📍")
+            legend_label = f"{t} | {icon}" # Simplified legend
             
-            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2, shape='spline'), showlegend=False, hoverinfo='skip'))
-            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='markers', marker=dict(size=4, color=color, opacity=0.4), name=t, customdata=np.stack((df_p['date_str'], df_p['full_name']), axis=-1), hovertemplate="<b>%{name} | %{customdata[1]}</b><br>%{customdata[0]}<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>"))
+            # The Tail Line
+            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2.5, shape='spline'), showlegend=False, hoverinfo='skip'))
             
-            # The "Icon Head"
+            # The Interactive Tail Dots (Invisible but hoverable)
+            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='markers', marker=dict(size=6, color=color, opacity=0), name=legend_label, customdata=np.stack((df_p['date_str'], df_p['full_name']), axis=-1), hovertemplate="<b>%{name} | %{customdata[1]}</b><br>%{customdata[0]}<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>"))
+            
+            # The Iconic Head (Simplified: No text overlay)
             fig.add_trace(go.Scatter(
                 x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], 
                 mode='text+markers', 
-                marker=dict(size=1, color=color), # Small invisible marker
-                text=[f"<b>{icon}</b>"], # The Emoji
-                textfont=dict(size=20),
+                marker=dict(size=25, color='rgba(255,255,255,0.7)', line=dict(width=1, color=color)), # White "Halo" Background
+                text=[f"{icon}"], 
+                textfont=dict(size=18),
                 textposition="middle center",
+                showlegend=False,
                 name=t, customdata=np.stack(([df_p['date_str'].iloc[-1]], [df_p['full_name'].iloc[-1]]), axis=-1), 
-                hovertemplate="<b>%{name} | %{customdata[1]}</b><br>LATEST<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>", 
-                showlegend=False
-            ))
-            
-            # Add ticker label offset slightly above icon
-            fig.add_trace(go.Scatter(
-                x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], 
-                mode='text',
-                text=[f"<b>{t}</b>"],
-                textposition="top center",
-                textfont=dict(size=10, color="black"),
-                showlegend=False, hoverinfo='skip'
+                hovertemplate="<b>%{name} | %{customdata[1]}</b><br>LATEST<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>"
             ))
         
-        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
+        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"), legend=dict(orientation="h", y=-0.1, xanchor="center", x=0.5))
         st.plotly_chart(fig, use_container_width=True)
         
         st.subheader("📊 Dual-Timeframe Quant Grid")
