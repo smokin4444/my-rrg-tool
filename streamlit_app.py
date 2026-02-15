@@ -11,8 +11,7 @@ LOOKBACK = 14
 RRG_CENTER = 100
 EPSILON = 1e-8
 Z_LIMITS = (80, 120)  
-# Zoomed out the default view as requested
-CHART_RANGE = [96.5, 103.5] 
+CHART_RANGE = [96.5, 103.5] # Wider zoom
 POWER_WALK_LEVEL = 101.5
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
@@ -69,8 +68,10 @@ with st.sidebar:
     benchmark = st.text_input("Active Benchmark:", value=auto_bench)
     
     st.markdown("---")
-    main_timeframe = st.radio("Display Chart Timeframe:", ["Daily", "Weekly"])
-    tail_len = st.slider("Tail Length:", 2, 30, 12)
+    # UPDATED DEFAULT: Weekly 
+    main_timeframe = st.radio("Display Chart Timeframe:", ["Weekly", "Daily"], index=0)
+    # UPDATED DEFAULT: 3 bars
+    tail_len = st.slider("Tail Length:", 2, 30, 3)
     
     if st.button("♻️ Reset Engine"):
         st.cache_data.clear()
@@ -157,20 +158,24 @@ try:
         
         st.subheader(f"🌀 {main_timeframe} Chart Rotation vs {benchmark}")
         fig = go.Figure()
-        
-        # Quadrant Lines
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
         
-        # Re-adding the Power Walk Zone
-        fig.add_shape(type="line", x0=POWER_WALK_LEVEL, y0=0, x1=POWER_WALK_LEVEL, y1=200, line=dict(color="rgba(46, 204, 113, 0.4)", dash="dash", width=2))
-        fig.add_annotation(x=POWER_WALK_LEVEL, y=103, text="<b>POWER WALK ZONE</b>", showarrow=False, font=dict(color="#27ae60", size=10))
+        # POWER WALK SHADING (Green shaded area for X > 101.5)
+        fig.add_vrect(
+            x0=POWER_WALK_LEVEL, x1=CHART_RANGE[1],
+            fillcolor="#2ECC71", opacity=0.1, layer="below", line_width=0,
+            annotation_text="POWER WALK ZONE", annotation_position="top left",
+            annotation_font=dict(color="#27ae60", size=10)
+        )
+        # Vertical Border for Shading
+        fig.add_shape(type="line", x0=POWER_WALK_LEVEL, y0=0, x1=POWER_WALK_LEVEL, y1=200, line=dict(color="#27ae60", dash="dash", width=1.5))
         
         for i, t in enumerate(to_plot):
             df = hist[t]
             color = px.colors.qualitative.Alphabet[i % 26]
             df_p = df.iloc[-min(tail_len, len(df)):]
-            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2, shape='spline'), showlegend=False, hoverinfo='skip'))
+            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2.5, shape='spline'), showlegend=False, hoverinfo='skip'))
             fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='markers', marker=dict(size=4, color=color, opacity=0.4), name=t, customdata=np.stack((df_p['date_str'], df_p['full_name']), axis=-1), hovertemplate="<b>%{name} | %{customdata[1]}</b><br>%{customdata[0]}<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>"))
             fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), text=[f"<b>{t}</b>"], textposition="top center", name=t, customdata=np.stack(([df_p['date_str'].iloc[-1]], [df_p['full_name'].iloc[-1]]), axis=-1), hovertemplate="<b>%{name} | %{customdata[1]}</b><br>LATEST<br>Ratio: %{x:.2f}<br>Mom: %{y:.2f}<extra></extra>", showlegend=False))
         
