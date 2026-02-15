@@ -21,10 +21,10 @@ TICKER_NAMES = {
     "GLD": "Gold", "SLV": "Silver", "COPX": "Copper Miners", "XLE": "Energy",
     "XLK": "Technology", "XLY": "Consumer Durables", "XLC": "Communications", 
     "XLF": "Finance", "XLI": "Producer Manufacturing", 
-    "XLV": "Health Services", "XLP": "Cons Non-Durables", "XLU": "Utilities", 
+    "XLV": "Health Services", "XLP": "Cons Staples", "XLU": "Utilities", 
     "XLB": "Materials (Broad)", "IYT": "Transportation", "PICK": "Non-Energy Minerals", 
     "URNM": "Energy Minerals", "OII": "Industrial Services", "VAW": "Process Industries", 
-    "SMH": "Electronic Tech", "IGV": "Tech Services", "IBB": "Health Tech", "XHB": "Cons. Durables",
+    "SMH": "Electronic Tech", "IGV": "Software", "IBB": "Health Tech", "XHB": "Cons. Durables",
     "PEJ": "Consumer Services", "XRT": "Retail Trade", "IYZ": "Communications", "VNQ": "Invest Trusts",
     "VTI": "Misc/Broad", "IBIT": "Bitcoin Trust", "FAST": "Distribution", "IHE": "Pharma",
     "XES": "Contract Drilling", "OIH": "Oilfield Services", "FLR": "Eng. & Construction",
@@ -42,12 +42,14 @@ TICKER_NAMES = {
     "PSCT": "Tech (Small Cap)", "PSCD": "Cons Disc (Small Cap)", "PSCF": "Financials (Small Cap)", 
     "PSCI": "Industrials (Small Cap)", "PSCH": "Health Care (Small Cap)", "PSCC": "Cons Staples (Small Cap)", 
     "PSCU": "Utilities (Small Cap)", "PSCM": "Materials (Small Cap)", "PSCE": "Energy (Small Cap)",
-    "XLRE": "Real Estate (Large Cap)", "XBI": "Biotech (S&P)"
+    "XLRE": "Real Estate", "XBI": "Biotech (S&P)", "ARKK": "Innovation (High Beta)", "TLT": "20+Y Treasury Bonds"
 }
 
 # --- WATCHLISTS ---
+# Major Themes now updated with ARKK and TLT
+MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT"
+
 TV_INDUSTRIES_FULL = "XES, OIH, FLR, EVX, AMLP, VTI, TTD, VPP, SPGI, MAN, WSC, SYY, AVT, MCK, FI, ACN, IGV, FDN, UNH, THC, HCA, IQV, DIS, NXST, CHTR, NYT, EATZ, CRUZ, BETZ, PEJ, KR, CVS, M, WMT, NKE, HD, BBY, TSCO, ONLN, IYT, XLU, XLF, IYZ, XLI, VAW, SMH, IBB, XHB, XLP, XRT"
-MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT"
 SECTOR_ROTATION = "XLK, IGV, XLY, XLC, XBI, XLF, XLI, XLE, XLV, IHE, XLP, XLU, XLB, XLRE, PSCT, PSCD, PSCF, PSCI, PSCH, PSCC, PSCU, PSCM, PSCE"
 ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
 STARTUP_THEMES = "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
@@ -157,11 +159,8 @@ def run_dual_analysis(ticker_str, bench, tf_display):
                    "📈 PULLBACK BUY" if stg_d == "IMPROVING" and stg_w == "LEADING" else \
                    "⚠️ TACTICAL" if stg_d == "LEADING" and stg_w == "LAGGING" else "---"
             
-            # This is where the Full Name is mapped to the table column
-            full_name_label = TICKER_NAMES.get(t, t)
-            
             table_data.append({
-                "Ticker": t, "Full Name": full_name_label, "Sync Status": sync,
+                "Ticker": t, "Full Name": TICKER_NAMES.get(t, t), "Sync Status": sync,
                 "Daily Stage": stg_d, "Weekly Stage": stg_w, "Heading": heading,
                 "Rotation Score": round((res_display['x'].iloc[-1] * 0.5) + (velocity * 2.0), 1)
             })
@@ -194,7 +193,6 @@ try:
         st.plotly_chart(fig, use_container_width=True)
         
         st.subheader("📊 Dual-Timeframe Quant Grid")
-        
         def color_sync(val):
             if val == "💎 BULLISH SYNC": return "background-color: #2ECC71; color: white"
             if val == "📈 PULLBACK BUY": return "background-color: #3498DB; color: white"
