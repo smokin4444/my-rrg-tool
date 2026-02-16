@@ -24,43 +24,53 @@ TICKER_NAMES = {
     "XLF": "Finance", "XLI": "Producer Manufacturing", 
     "XLV": "Health Services", "XLP": "Cons Staples", "XLU": "Utilities", 
     "XLB": "Materials (Broad)", "IYT": "Transportation", "PICK": "Non-Energy Minerals", 
-    "URNM": "Energy Minerals", "OII": "Oilfield Services", "VAW": "Process Industries", 
+    "URNM": "Energy Minerals", "OII": "Industrial Services", "VAW": "Process Industries", 
     "SMH": "Electronic Tech", "IGV": "Software", "IBB": "Health Tech", "XHB": "Cons. Durables",
     "PEJ": "Consumer Services", "XRT": "Retail Trade", "IYZ": "Communications", "VNQ": "Invest Trusts",
     "VTI": "Misc/Broad", "IBIT": "Bitcoin Trust", "FAST": "Distribution", "IHE": "Pharma",
-    "XES": "Contract Drilling", "FLR": "Eng. & Construction", "XME": "S&P Metals & Mining",
-    "BDRY": "Dry Bulk Shipping", "MOO": "Agribusiness", "EVX": "Environmental Svcs", 
-    "AMLP": "Pipelines (MLP)", "TTD": "Ad-Tech/Marketing", "VPP": "Commercial Printing", 
-    "SPGI": "Financial Services", "MAN": "Personnel Services", "WSC": "Wholesale Dist.", 
-    "SYY": "Food Distribution", "AVT": "Electronics Dist.", "MCK": "Medical Distribution", 
-    "FI": "Data Processing", "ACN": "IT Services", "FDN": "Internet Services", 
-    "UNH": "Managed Health", "THC": "Hospital Mgmt", "HCA": "Medical Services", 
-    "IQV": "Health Industry Svcs", "DIS": "Media Conglomerate", "NXST": "Broadcasting", 
-    "CHTR": "Cable/Satellite TV", "NYT": "Publishing", "EATZ": "Restaurants", 
-    "CRUZ": "Hotels/Cruises", "BETZ": "Casinos/Gaming", "KR": "Food Retail", 
-    "CVS": "Drugstore Chains", "M": "Department Stores", "WMT": "Discount Stores", 
-    "NKE": "Apparel Retail", "HD": "Home Improvement", "BBY": "Electronics Stores", 
-    "TSCO": "Specialty Stores", "ONLN": "Internet Retail", "PSCT": "Tech (Small Cap)", 
-    "PSCD": "Cons Disc (Small Cap)", "PSCF": "Financials (Small Cap)", 
-    "PSCI": "Industrials (Small Cap)", "PSCH": "Health Care (Small Cap)", 
-    "PSCC": "Cons Staples (Small Cap)", "PSCU": "Utilities (Small Cap)", 
-    "PSCM": "Materials (Small Cap)", "PSCE": "Energy (Small Cap)", "XLRE": "Real Estate", 
-    "XBI": "Biotech (S&P)", "ARKK": "Innovation (High Beta)", "TLT": "20+Y Treasury Bonds", 
-    "UUP": "US Dollar Index", "KGLD": "YieldMax Gold", "CHPY": "YieldMax China", "SOXY": "YieldMax Semi",
-    "USCL.TO": "Horizon US Large Cap", "BANK.TO": "Evolve Cdn Banks"
+    "XES": "Contract Drilling", "OIH": "Oilfield Services", "FLR": "Eng. & Construction",
+    "EVX": "Environmental Svcs", "AMLP": "Pipelines (MLP)", "TTD": "Ad-Tech/Marketing",
+    "VPP": "Commercial Printing", "SPGI": "Financial Services", "MAN": "Personnel Services",
+    "WSC": "Wholesale Dist.", "SYY": "Food Distribution", "AVT": "Electronics Dist.",
+    "MCK": "Medical Distribution", "FI": "Data Processing", "ACN": "IT Services",
+    "FDN": "Internet Services", "UNH": "Managed Health", "THC": "Hospital Mgmt",
+    "HCA": "Medical Services", "IQV": "Health Industry Svcs", "DIS": "Media Conglomerate",
+    "NXST": "Broadcasting", "CHTR": "Cable/Satellite TV", "NYT": "Publishing",
+    "EATZ": "Restaurants", "CRUZ": "Hotels/Cruises", "BETZ": "Casinos/Gaming",
+    "KR": "Food Retail", "CVS": "Drugstore Chains", "M": "Department Stores",
+    "WMT": "Discount Stores", "NKE": "Apparel Retail", "HD": "Home Improvement",
+    "BBY": "Electronics Stores", "TSCO": "Specialty Stores", "ONLN": "Internet Retail",
+    "PSCT": "Tech (Small Cap)", "PSCD": "Cons Disc (Small Cap)", "PSCF": "Financials (Small Cap)", 
+    "PSCI": "Industrials (Small Cap)", "PSCH": "Health Care (Small Cap)", "PSCC": "Cons Staples (Small Cap)", 
+    "PSCU": "Utilities (Small Cap)", "PSCM": "Materials (Small Cap)", "PSCE": "Energy (Small Cap)",
+    "XLRE": "Real Estate", "XBI": "Biotech (S&P)", "ARKK": "Innovation (High Beta)", 
+    "TLT": "20+Y Treasury Bonds", "UUP": "US Dollar Index (Bullish)",
+    # --- INCOME STOCKS ---
+    "QDVO": "YieldMax QQQ Option Income", "CEFS": "Saba Closed-End Funds", "MLPX": "Global X MLP", 
+    "PBDC": "Putnam BDC Income", "PFFA": "Virtus Preferred Stock", "RLTY": "Cohen & Steers RE", 
+    "UTF": "Cohen & Steers Infrastructure", "ARCC": "Ares Capital (BDC)", "MAIN": "Main Street Capital (BDC)", 
+    "FEPI": "Rex FANG & Innovation", "BSK": "Baskervill (Proxy)", "STK": "Columbia Tech Income", 
+    "BTCI": "YieldMax Bitcoin Option", "MSTY": "YieldMax MicroStrategy Option", 
+    "USCL.TO": "Horizon US Large Cap (CAD)", "BANK.TO": "Evolve Cdn Banks (CAD)",
+    "KGLD": "YieldMax Gold Option Income", "CHPY": "YieldMax China Option Income", "SOXY": "YieldMax Semi Option Income"
 }
 
 # --- WATCHLISTS ---
-MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT, UUP, XME"
-TV_INDUSTRIES_FULL = "XES, OIH, FLR, EVX, AMLP, VTI, TTD, VPP, SPGI, MAN, WSC, SYY, AVT, MCK, FI, ACN, IGV, FDN, UNH, THC, HCA, IQV, DIS, NXST, CHTR, NYT, EATZ, CRUZ, BETZ, PEJ, KR, CVS, M, WMT, NKE, HD, BBY, TSCO, ONLN, IYT, XLU, XLF, IYZ, XLI, VAW, SMH, IBB, XHB, XLP, XRT, BDRY"
-HARD_ASSETS_LIVE = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, URNM, ZS=F, MOO, OIH"
+INCOME_STOCKS = "QDVO, CEFS, MLPX, AMLP, PBDC, PFFA, RLTY, UTF, ARCC, MAIN, FEPI, BSK, STK, BTCI, MSTY, USCL.TO, BANK.TO, KGLD, CHPY, SOXY"
+MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, IJR, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT, UUP"
+TV_INDUSTRIES_FULL = "XES, OIH, FLR, EVX, AMLP, VTI, TTD, VPP, SPGI, MAN, WSC, SYY, AVT, MCK, FI, ACN, IGV, FDN, UNH, THC, HCA, IQV, DIS, NXST, CHTR, NYT, EATZ, CRUZ, BETZ, PEJ, KR, CVS, M, WMT, NKE, HD, BBY, TSCO, ONLN, IYT, XLU, XLF, IYZ, XLI, VAW, SMH, IBB, XHB, XLP, XRT"
+SECTOR_ROTATION = "XLK, IGV, XLY, XLC, XBI, XLF, XLI, XLE, XLV, IHE, XLP, XLU, XLB, XLRE, PSCT, PSCD, PSCF, PSCI, PSCH, PSCC, PSCU, PSCM, PSCE"
+ENERGY_TORQUE = "AROC, KGS, LBRT, NE, SM, CRC, BTU, WHD, MGY, CNR, OII, INVX, LEU, VAL, CIVI, NINE, BORR, HP, STX, BHL"
+STARTUP_THEMES = "AMD, AMPX, BABA, BIDU, BITF, CIFR, CLSK, CORZ, CRWV, EOSE, GOOGL, HUT, IREN, LAES, NBIS, NUAI, NVDA, NVTS, PATH, POWL, RR, SERV, SNDK, TE, TSLA, TSM, WDC, ZETA, BHP, CMCL, COPX, CPER, ERO, FCX, HBM, HG=F, IE, RIO, SCCO, TGB, TMQ, AMTM, AVAV, BWXT, DPRO, ESLT, KRKNF, KRMN, KTOS, LPTH, MOB, MRCY, ONDS, OSS, PLTR, PRZO, RCAT, TDY, UMAC, CRDO, IBRX, IONQ, IONR, LAC, MP, NAK, NET, OPTT, PPTA, RZLT, SKYT, TMDX, UAMY, USAR, UUUU, WWR, ASTS, BKSY, FLY, GSAT, HEI, IRDM, KULR, LUNR, MNTS, PL, RDW, RKLB, SATL, SATS, SIDU, SPIR, UFO, VOYG, VSAT"
+TECH_THEMES = "AIQ, SMH, SOXX, SETM, URNM, VST, BOTZ, HOOD, IBIT, LUNR, QTUM, AVAV, LIT, IGV"
+HARD_ASSETS_LIVE = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, URNM, ZS=F"
 
-# --- SIDEBAR & ENGINE (Weekly Default / 3 Bar Tail) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("🎯 Watchlist")
     heap_type = st.radio("Choose Group:", ["Major Themes", "Sector Rotation", "Energy Torque", "Startup", "Tech Themes", "Hard Assets (Live)", "TV Industries (Full)", "Income Stocks", "Single/Custom"])
     
-    current_list = {"Major Themes": MAJOR_THEMES, "Sector Rotation": SECTOR_ROTATION, "Energy Torque": ENERGY_TORQUE, "Startup": STARTUP_THEMES, "Tech Themes": TECH_THEMES, "Hard Assets (Live)": HARD_ASSETS_LIVE, "TV Industries (Full)": TV_INDUSTRIES_FULL, "Income Stocks": "QDVO, CEFS, MLPX, AMLP, PBDC, PFFA, RLTY, UTF, ARCC, MAIN, FEPI, BSK, STK, BTCI, MSTY, USCL.TO, BANK.TO, KGLD, CHPY, SOXY", "Single/Custom": ""}.get(heap_type)
+    current_list = {"Major Themes": MAJOR_THEMES, "Sector Rotation": SECTOR_ROTATION, "Energy Torque": ENERGY_TORQUE, "Startup": STARTUP_THEMES, "Tech Themes": TECH_THEMES, "Hard Assets (Live)": HARD_ASSETS_LIVE, "TV Industries (Full)": TV_INDUSTRIES_FULL, "Income Stocks": INCOME_STOCKS, "Single/Custom": ""}.get(heap_type)
     auto_bench = "ONE" if heap_type in ["Hard Assets (Live)", "Income Stocks"] else "SPY"
     
     tickers_input = st.text_area("Ticker Heap:", value=current_list, height=150)
