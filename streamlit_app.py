@@ -34,7 +34,10 @@ TICKER_NAMES = {
     "QDVO": "YieldMax QQQ", "FEPI": "Rex FANG", "KGLD": "YieldMax Gold", "SOXY": "YieldMax Semi",
     "CHPY": "YieldMax China", "MSTY": "YieldMax MSTR", "USCL.TO": "Horizon US Large Cap", 
     "BANK.TO": "Evolve Cdn Banks", "PSCT": "Tech (Small Cap)", "PSCE": "Energy (Small Cap)",
-    "XLRE": "Real Estate", "XBI": "Biotech (S&P)", "ARCC": "Ares Capital (BDC)", "MAIN": "Main Street Capital"
+    "XLRE": "Real Estate", "XBI": "Biotech (S&P)", "ARCC": "Ares Capital (BDC)", "MAIN": "Main Street Capital",
+    "GC=F": "Gold Futures", "SI=F": "Silver Futures", "HG=F": "Copper Futures", "CL=F": "Crude Oil",
+    "BZ=F": "Brent Oil", "NG=F": "Natural Gas", "PL=F": "Platinum", "PA=F": "Palladium",
+    "TIO=F": "Iron Ore", "ALB": "Albemarle (Lithium)", "ZS=F": "Soybeans"
 }
 
 # --- WATCHLISTS ---
@@ -58,18 +61,25 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- FETCH ENGINE ---
+# --- REFINED FETCH ENGINE ---
 def fetch_safe(ticker, tf):
     try:
-        data = yf.download(ticker, period="2y", interval=("1wk" if tf == "Weekly" else "1d"), progress=False, auto_adjust=True)
+        # We set auto_adjust=False because futures (=F) often fail with it
+        data = yf.download(ticker, period="2y", interval=("1wk" if tf == "Weekly" else "1d"), progress=False, auto_adjust=False)
         if data.empty: return None
-        return data['Close'][ticker] if isinstance(data.columns, pd.MultiIndex) else data['Close']
+        
+        # Priority for the column name: yfinance can be erratic between 'Close' and 'Adj Close'
+        target_col = 'Adj Close' if 'Adj Close' in data.columns else 'Close'
+        
+        if isinstance(data.columns, pd.MultiIndex):
+            return data[target_col][ticker]
+        return data[target_col]
     except: return None
 
 def calculate_rrg(price_s, bench_s, ticker):
     try:
         common = price_s.index.intersection(bench_s.index)
-        if len(common) < 20: return None # LENGTH GUARD: Prevents out-of-bounds error
+        if len(common) < 20: return None
         
         p, b = price_s.loc[common], bench_s.loc[common]
         rel = (p / b) * 100
@@ -91,10 +101,15 @@ try:
     is_abs = benchmark.upper() == "ONE"
     
     with st.spinner("Loading Benchmark..."):
-        bench_data = pd.Series(1.0, index=pd.date_range(end=pd.Timestamp.now(), periods=500)) if is_abs else fetch_safe(benchmark, main_timeframe)
-        # Benchmark guard for Daily/Weekly sync
-        bench_d = pd.Series(1.0, index=pd.date_range(end=pd.Timestamp.now(), periods=500)) if is_abs else fetch_safe(benchmark, "Daily")
-        bench_w = pd.Series(1.0, index=pd.date_range(end=pd.Timestamp.now(), periods=500)) if is_abs else fetch_safe(benchmark, "Weekly")
+        # Fix for benchmark fetch
+        if is_abs:
+            bench_data = pd.Series(1.0, index=pd.date_range(end=pd.Timestamp.now(), periods=500))
+            bench_d = bench_data
+            bench_w = bench_data
+        else:
+            bench_data = fetch_safe(benchmark, main_timeframe)
+            bench_d = fetch_safe(benchmark, "Daily")
+            bench_w = fetch_safe(benchmark, "Weekly")
     
     if bench_data is not None:
         results_map = {}
@@ -105,12 +120,11 @@ try:
             if p_display is not None:
                 m_display = calculate_rrg(p_display, bench_data, t)
                 
-                # Pre-fetch and guard for table logic
+                # Table Sync Calcs
                 p_d = fetch_safe(t, "Daily")
                 p_w = fetch_safe(t, "Weekly")
-                
-                m_daily = calculate_rrg(p_d, bench_d, t) if p_d is not None else None
-                m_weekly = calculate_rrg(p_w, bench_w, t) if p_w is not None else None
+                m_daily = calculate_rrg(p_d, bench_d, t) if p_d is not None and bench_d is not None else None
+                m_weekly = calculate_rrg(p_w, bench_w, t) if p_w is not None and bench_w is not None else None
                 
                 if m_display is not None:
                     results_map[t] = {'chart': m_display, 'daily': m_daily, 'weekly': m_weekly}
@@ -120,6 +134,7 @@ try:
         if results_map:
             st.subheader(f"🌀 {main_timeframe} Rotation vs {benchmark}")
             fig = go.Figure()
+            # Shading
             fig.add_vrect(x0=POWER_WALK_LEVEL, x1=CHART_RANGE[1], fillcolor="rgba(46, 204, 113, 0.1)", layer="below", line_width=0)
             fig.add_shape(type="line", x0=100, y0=80, x1=100, y1=120, line=dict(color="rgba(0,0,0,0.2)", dash="dot"))
             fig.add_shape(type="line", x0=80, y0=100, x1=120, y1=100, line=dict(color="rgba(0,0,0,0.2)", dash="dot"))
@@ -137,16 +152,16 @@ try:
             fig.update_layout(template="plotly_white", height=750, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=[96.5, 103.5], title="RS-Momentum"))
             st.plotly_chart(fig, use_container_width=True)
 
-            # Table Logic
+            # Strategy Table
             st.subheader("📊 Dual-Timeframe Strategy")
             table_rows = []
             for t, data in results_map.items():
                 def get_q(df):
                     if df is None or len(df) < 1: return "N/A"
-                    x, y = df['x'].iloc[-1], df['y'].iloc[-1]
-                    if x >= 100 and y >= 100: return "LEADING"
-                    if x < 100 and y >= 100: return "IMPROVING"
-                    if x < 100 and y < 100: return "LAGGING"
+                    lx, ly = df['x'].iloc[-1], df['y'].iloc[-1]
+                    if lx >= 100 and ly >= 100: return "LEADING"
+                    if lx < 100 and ly >= 100: return "IMPROVING"
+                    if lx < 100 and ly < 100: return "LAGGING"
                     return "WEAKENING"
                 
                 q_d, q_w = get_q(data['daily']), get_q(data['weekly'])
