@@ -15,7 +15,7 @@ POWER_WALK_LEVEL = 101.5
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
-# --- TICKER DICTIONARY ---
+# --- TICKER DICTIONARY (Full) ---
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
@@ -61,31 +61,32 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- REFINED FETCH ENGINE ---
+# --- REFINED FAIL-SAFE FETCH ---
 def fetch_safe(ticker, tf):
     try:
-        # We set auto_adjust=False because futures (=F) often fail with it
-        data = yf.download(ticker, period="2y", interval=("1wk" if tf == "Weekly" else "1d"), progress=False, auto_adjust=False)
+        # Period 2y is stable for futures
+        data = yf.download(ticker, period="2y", interval=("1wk" if tf == "Weekly" else "1d"), progress=False)
         if data.empty: return None
         
-        # Priority for the column name: yfinance can be erratic between 'Close' and 'Adj Close'
-        target_col = 'Adj Close' if 'Adj Close' in data.columns else 'Close'
-        
-        if isinstance(data.columns, pd.MultiIndex):
-            return data[target_col][ticker]
-        return data[target_col]
+        # Check for multiple possible column names (Yahoo can vary)
+        for col in ['Adj Close', 'Close']:
+            if col in data.columns:
+                if isinstance(data.columns, pd.MultiIndex):
+                    return data[col][ticker]
+                return data[col]
+        return None
     except: return None
 
 def calculate_rrg(price_s, bench_s, ticker):
     try:
         common = price_s.index.intersection(bench_s.index)
         if len(common) < 20: return None
-        
         p, b = price_s.loc[common], bench_s.loc[common]
+        
         rel = (p / b) * 100
         ratio_s = rel.ewm(span=3).mean()
-        
         x = RRG_CENTER + ((ratio_s - ratio_s.rolling(LOOKBACK).mean()) / ratio_s.rolling(LOOKBACK).std().replace(0, EPSILON))
+        
         y_raw = x.diff(1).ewm(span=3).mean()
         y = RRG_CENTER + (y_raw * 5)
         
@@ -95,46 +96,40 @@ def calculate_rrg(price_s, bench_s, ticker):
         return df
     except: return None
 
-# --- RUN ANALYSIS ---
+# --- RUN ---
 try:
-    active_tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+    ticker_list = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
     is_abs = benchmark.upper() == "ONE"
     
     with st.spinner("Loading Benchmark..."):
-        # Fix for benchmark fetch
-        if is_abs:
-            bench_data = pd.Series(1.0, index=pd.date_range(end=pd.Timestamp.now(), periods=500))
-            bench_d = bench_data
-            bench_w = bench_data
-        else:
-            bench_data = fetch_safe(benchmark, main_timeframe)
-            bench_d = fetch_safe(benchmark, "Daily")
-            bench_w = fetch_safe(benchmark, "Weekly")
-    
+        # Absolute ONE generates a static series of 1.0
+        bench_data = pd.Series(1.0, index=pd.date_range(end=pd.Timestamp.now(), periods=500)) if is_abs else fetch_safe(benchmark, main_timeframe)
+        bench_d = pd.Series(1.0, index=pd.date_range(end=pd.Timestamp.now(), periods=500)) if is_abs else fetch_safe(benchmark, "Daily")
+        bench_w = pd.Series(1.0, index=pd.date_range(end=pd.Timestamp.now(), periods=500)) if is_abs else fetch_safe(benchmark, "Weekly")
+
     if bench_data is not None:
         results_map = {}
         prog = st.progress(0)
         
-        for i, t in enumerate(active_tickers):
+        for i, t in enumerate(ticker_list):
             p_display = fetch_safe(t, main_timeframe)
             if p_display is not None:
                 m_display = calculate_rrg(p_display, bench_data, t)
                 
                 # Table Sync Calcs
-                p_d = fetch_safe(t, "Daily")
-                p_w = fetch_safe(t, "Weekly")
+                p_d, p_w = fetch_safe(t, "Daily"), fetch_safe(t, "Weekly")
                 m_daily = calculate_rrg(p_d, bench_d, t) if p_d is not None and bench_d is not None else None
                 m_weekly = calculate_rrg(p_w, bench_w, t) if p_w is not None and bench_w is not None else None
                 
                 if m_display is not None:
                     results_map[t] = {'chart': m_display, 'daily': m_daily, 'weekly': m_weekly}
-            prog.progress((i + 1) / len(active_tickers))
+            prog.progress((i + 1) / len(ticker_list))
         prog.empty()
 
         if results_map:
             st.subheader(f"🌀 {main_timeframe} Rotation vs {benchmark}")
             fig = go.Figure()
-            # Shading
+            # Power Walk Area
             fig.add_vrect(x0=POWER_WALK_LEVEL, x1=CHART_RANGE[1], fillcolor="rgba(46, 204, 113, 0.1)", layer="below", line_width=0)
             fig.add_shape(type="line", x0=100, y0=80, x1=100, y1=120, line=dict(color="rgba(0,0,0,0.2)", dash="dot"))
             fig.add_shape(type="line", x0=80, y0=100, x1=120, y1=100, line=dict(color="rgba(0,0,0,0.2)", dash="dot"))
@@ -152,7 +147,7 @@ try:
             fig.update_layout(template="plotly_white", height=750, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=[96.5, 103.5], title="RS-Momentum"))
             st.plotly_chart(fig, use_container_width=True)
 
-            # Strategy Table
+            # Sync Table
             st.subheader("📊 Dual-Timeframe Strategy")
             table_rows = []
             for t, data in results_map.items():
@@ -169,5 +164,5 @@ try:
                 table_rows.append({"Ticker": t, "Full Name": TICKER_NAMES.get(t, t), "Sync Status": sync, "Daily": q_d, "Weekly": q_w, "Score": round(data['chart']['x'].iloc[-1], 2)})
             
             st.dataframe(pd.DataFrame(table_rows).sort_values("Score", ascending=False).style.applymap(lambda v: "background-color: #2ecc71; color: white" if v == "💎 BULLISH SYNC" else "background-color: #3498db; color: white" if v == "📈 PULLBACK BUY" else "", subset=["Sync Status"]), use_container_width=True)
-except Exception as e:
-    st.error(f"Critical System Error: {e}")
+        else: st.warning("No data found for the selected tickers.")
+except Exception as e: st.error(f"Critical System Error: {e}")
