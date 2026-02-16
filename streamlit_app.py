@@ -24,7 +24,7 @@ TICKER_NAMES = {
     "XLF": "Finance", "XLI": "Producer Manufacturing", 
     "XLV": "Health Services", "XLP": "Cons Staples", "XLU": "Utilities", 
     "XLB": "Materials (Broad)", "IYT": "Transportation", "PICK": "Non-Energy Minerals", 
-    "URNM": "Energy Minerals", "OII": "Industrial Services", "VAW": "Process Industries", 
+    "URNM": "Energy Minerals", "OII": "Oilfield Services", "VAW": "Process Industries", 
     "SMH": "Electronic Tech", "IGV": "Software", "IBB": "Health Tech", "XHB": "Cons. Durables",
     "PEJ": "Consumer Services", "XRT": "Retail Trade", "IYZ": "Communications", "VNQ": "Invest Trusts",
     "VTI": "Misc/Broad", "IBIT": "Bitcoin Trust", "FAST": "Distribution", "IHE": "Pharma",
@@ -113,9 +113,14 @@ def get_metrics(df_raw, ticker, bench_t, is_absolute):
         common = px.index.intersection(bx.index)
         if len(common) < LOOKBACK + 5: return None
         px_a, bx_a = px.loc[common], bx.loc[common]
-        rel = (px_a / bx_a) * 100
+        
+        # --- SMOOTHING LOGIC ---
+        rel_raw = (px_a / bx_a) * 100
+        rel = rel_raw.ewm(span=3).mean() # 3-period EMA filter
+        
         def standardize(series):
             return RRG_CENTER + ((series - series.rolling(LOOKBACK).mean()) / series.rolling(LOOKBACK).std().replace(0, EPSILON))
+        
         ratio, mom = standardize(rel).clip(*Z_LIMITS), standardize(rel.diff(1)).clip(*Z_LIMITS)
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         df_res['date_str'] = df_res['date'].dt.strftime('%b %d, %Y')
