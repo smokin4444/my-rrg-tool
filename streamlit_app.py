@@ -26,7 +26,7 @@ if not os.path.exists(WATCHLIST_DIR):
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
-    "GLD": "Gold", "SLV": "Silver", "COPX": "Copper Miners", "XLE": "Energy",
+    "GLD": "Gold ETF", "SLV": "Silver ETF", "COPX": "Copper Miners", "XLE": "Energy",
     "XLK": "Technology", "XLY": "Consumer Durables", "XLC": "Communications", 
     "XLF": "Finance", "XLI": "Producer Manufacturing", 
     "XLV": "Health Services", "XLP": "Cons Staples", "XLU": "Utilities", 
@@ -34,33 +34,35 @@ TICKER_NAMES = {
     "SOXX": "Memory/Broad Semi", "FTXL": "Memory Super-Cycle (MU/WDC)", "IGV": "Software", 
     "XHB": "Home Construction", "IBIT": "Bitcoin Trust", "XME": "S&P Metals & Mining",
     "BDRY": "Dry Bulk Shipping", "BOAT": "Global Shipping ETF", "MOO": "Agribusiness",
-    "ZS=F": "Soybean Futures", "GC=F": "Gold Futures", "SI=F": "Silver Futures", 
-    "HG=F": "Copper Futures", "CL=F": "Crude Oil Futures",
-    "WGMI": "Bitcoin Miners", "HACK": "Cybersecurity", "BOTZ": "Robotics & AI", 
-    "QTUM": "Quantum Computing", "TAN": "Solar", "IDNA": "Genomics", "JETS": "Airlines", 
-    "SLX": "Steel", "KRE": "Regional Banks", "ITA": "Aerospace & Defense", 
-    "KWEB": "China Internet", "IHI": "Medical Devices", "OIH": "Oilfield Services",
-    # International Countries
+    "GC=F": "Gold Futures", "SI=F": "Silver Futures", "HG=F": "Copper Futures", 
+    "CL=F": "Crude Oil Futures", "BZ=F": "Brent Oil Futures", "NG=F": "Natural Gas Futures", 
+    "PL=F": "Platinum Futures", "PA=F": "Palladium Futures", "TIO=F": "Iron Ore Futures", 
+    "ZS=F": "Soybean Futures", "ALB": "Albemarle (Lithium)", "URNM": "Uranium Miners", 
+    "OII": "Ocean Engineering", "OIH": "Oilfield Services",
     "THD": "Thailand", "EWZ": "Brazil", "EWY": "South Korea", "EWT": "Taiwan", "EWG": "Germany",
     "EWJ": "Japan", "EWC": "Canada", "EWW": "Mexico", "EPU": "Peru", "ECH": "Chile",
     "ARGT": "Argentina", "EZA": "South Africa", "EIDO": "Indonesia", "EWM": "Malaysia",
     "EWP": "Spain", "EWL": "Switzerland", "EWQ": "France", "EWU": "United Kingdom",
     "EWH": "Hong Kong", "INDA": "India", "EWA": "Australia",
-    # Income Stocks
-    "USCL.TO": "Horizon US Large Cap", "BANK.TO": "Evolve Cdn Banks"
+    "USCL.TO": "Horizon US Large Cap", "BANK.TO": "Evolve Cdn Banks",
+    "WGMI": "Bitcoin Miners", "HACK": "Cybersecurity", "BOTZ": "Robotics & AI", 
+    "QTUM": "Quantum Computing", "TAN": "Solar", "IDNA": "Genomics", "JETS": "Airlines", 
+    "SLX": "Steel", "KRE": "Regional Banks", "ITA": "Aerospace & Defense", 
+    "KWEB": "China Internet", "IHI": "Medical Devices"
 }
 
-# --- UNIFIED WATCHLISTS ---
+# --- WATCHLISTS ---
 MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT, UUP, XME, SMH, SOXX, FTXL"
 INDUSTRY_THEMES = "SMH, FTXL, HACK, IGV, BOTZ, QTUM, IBIT, WGMI, GDX, SIL, XME, SLX, TAN, XBI, IDNA, IYT, JETS, XHB, BOAT, BDRY, KRE, ITA, KWEB, XLE, OIH, IHI"
 INTL_COUNTRIES = "THD, EWZ, EWY, EWT, EWG, EWJ, EWC, EWW, EPU, ECH, ARGT, EZA, EIDO, EWM, EWP, EWL, EWQ, EWU, EWH, INDA, EWA"
 INCOME_STOCKS = "QDVO, CEFS, MLPX, AMLP, PBDC, PFFA, RLTY, UTF, ARCC, MAIN, FEPI, USCL.TO, BANK.TO"
 HARD_ASSETS = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, URNM, ZS=F, MOO, OIH"
+TV_INDUSTRIES = "BOAT, BDRY, XES, OIH, FLR, EVX, AMLP, VTI, TTD, VPP, SPGI, MAN, WSC, SYY, AVT, MCK, FI, ACN, IGV, FDN, UNH, THC, HCA, IQV, DIS, NXST, CHTR, NYT, EATZ, CRUZ, BETZ, PEJ, KR, CVS, M, WMT, NKE, HD, BBY, TSCO, ONLN, IYT"
 
 # --- SIDEBAR & CUSTOM LIST LOGIC ---
 with st.sidebar:
     st.header("🎯 Watchlist")
-    group_choice = st.radio("Choose Group:", ["Major Themes", "Industry Themes (Unified)", "International Countries", "Hard Assets", "Income Stocks", "Custom Manager"])
+    group_choice = st.radio("Choose Group:", ["Major Themes", "Industry Themes (Unified)", "International Countries", "Hard Assets", "TV Industries", "Income Stocks", "Custom Manager"])
     
     tickers_input = ""
     if group_choice == "Custom Manager":
@@ -84,11 +86,9 @@ with st.sidebar:
                 st.rerun()
     else:
         tickers_input = {
-            "Major Themes": MAJOR_THEMES, 
-            "Industry Themes (Unified)": INDUSTRY_THEMES,
-            "International Countries": INTL_COUNTRIES,
-            "Hard Assets": HARD_ASSETS, 
-            "Income Stocks": INCOME_STOCKS
+            "Major Themes": MAJOR_THEMES, "Industry Themes (Unified)": INDUSTRY_THEMES,
+            "International Countries": INTL_COUNTRIES, "Hard Assets": HARD_ASSETS, 
+            "TV Industries": TV_INDUSTRIES, "Income Stocks": INCOME_STOCKS
         }.get(group_choice, "")
         tickers_input = st.text_area("Ticker Heap:", value=tickers_input, height=150)
 
@@ -134,11 +134,9 @@ def get_metrics(df_raw, ticker, bench_t, is_absolute):
         if len(common) < LOOKBACK + 5: return None
         px_a, bx_a = px.loc[common], bx.loc[common]
         rel_raw = (px_a / bx_a) * 100
-        rel = rel_raw.ewm(span=3).mean() # Smoothing
-        
+        rel = rel_raw.ewm(span=3).mean() 
         def standardize(series):
             return RRG_CENTER + ((series - series.rolling(LOOKBACK).mean()) / series.rolling(LOOKBACK).std().replace(0, EPSILON))
-        
         ratio, mom = standardize(rel).clip(*Z_LIMITS), standardize(rel.diff(1)).clip(*Z_LIMITS)
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         if len(df_res) > 1:
@@ -183,7 +181,11 @@ def run_dual_analysis(ticker_str, bench, tf_display):
 try:
     df_main, hist = run_dual_analysis(tickers_input, benchmark, main_timeframe)
     if not df_main.empty:
-        # Checkbox Logic Restored
+        # --- BULLISH SYNC ALERT BOX ---
+        sync_list = df_main[df_main['Sync Status'] == "💎 BULLISH SYNC"]['Ticker'].tolist()
+        if sync_list:
+            st.success(f"💎 **BULLISH SYNC ALERT (Leading on Daily & Weekly):** {', '.join(sync_list)}")
+        
         col_t1, col_t2 = st.columns([1, 4])
         with col_t1: show_all = st.checkbox("Show All Tickers", value=True)
         default_selection = list(hist.keys()) if show_all else []
@@ -202,15 +204,15 @@ try:
             fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2.5, shape='spline'), showlegend=False))
             fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), text=[f"<b>{t}</b>"], textposition="top center", name=t))
         
-        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE), yaxis=dict(range=CHART_RANGE))
+        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
         
         st.subheader("📊 Dual-Timeframe Quant Grid")
         st.dataframe(df_main.sort_values(by='Rotation Score', ascending=False), use_container_width=True)
         
-        # DeepVue Theme Tracker at the very bottom
+        # Industry Heat Tracker
         st.markdown("---")
-        st.subheader("🔥 Industry Heat Score Tracker")
+        st.subheader("🔥 Industry/Asset Heat Score Tracker")
         theme_data = []
         total_p = 0
         for t, data in hist.items():
@@ -218,9 +220,9 @@ try:
             chg_1w = cx - data['x'].iloc[-2]
             is_p = 1 if cx >= POWER_WALK_LEVEL else 0
             total_p += is_p
-            theme_data.append({"Ticker": t, "Industry/Name": TICKER_NAMES.get(t, t), "RS Ratio": round(cx, 2), "1W Δ": round(chg_1w, 2), "Status": "🔥 ACCEL" if chg_1w > 0 else "🧊 COOL"})
+            theme_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "RS Ratio": round(cx, 2), "1W Δ": round(chg_1w, 2), "Status": "🔥 ACCEL" if chg_1w > 0 else "🧊 COOL"})
         
-        st.metric("Group Heat Score", f"{int((total_p/len(hist))*100)}%")
+        st.metric("Group Heat Score", f"{int((total_p/len(hist))*100)}%", help="Percentage of group in Power Walk Zone")
         st.dataframe(pd.DataFrame(theme_data).sort_values("1W Δ", ascending=False), use_container_width=True)
 
 except Exception as e: st.error(f"Error: {e}")
