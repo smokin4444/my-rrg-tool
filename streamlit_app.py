@@ -19,7 +19,6 @@ WATCHLIST_DIR = "my_watchlists"
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
-# Ensure persistent storage directory exists
 if not os.path.exists(WATCHLIST_DIR):
     os.makedirs(WATCHLIST_DIR)
 
@@ -40,7 +39,7 @@ TICKER_NAMES = {
     "WGMI": "Bitcoin Miners", "HACK": "Cybersecurity", "BOTZ": "Robotics & AI", 
     "QTUM": "Quantum Computing", "TAN": "Solar", "IDNA": "Genomics", "JETS": "Airlines", 
     "SLX": "Steel", "KRE": "Regional Banks", "ITA": "Aerospace & Defense", 
-    "KWEB": "China Internet", "IHI": "Medical Devices",
+    "KWEB": "China Internet", "IHI": "Medical Devices", "OIH": "Oilfield Services",
     # International Countries
     "THD": "Thailand", "EWZ": "Brazil", "EWY": "South Korea", "EWT": "Taiwan", "EWG": "Germany",
     "EWJ": "Japan", "EWC": "Canada", "EWW": "Mexico", "EPU": "Peru", "ECH": "Chile",
@@ -51,18 +50,17 @@ TICKER_NAMES = {
     "USCL.TO": "Horizon US Large Cap", "BANK.TO": "Evolve Cdn Banks"
 }
 
-# --- PRE-SET WATCHLISTS ---
-INTL_COUNTRIES = "THD, EWZ, EWY, EWT, EWG, EWJ, EWC, EWW, EPU, ECH, ARGT, EZA, EIDO, EWM, EWP, EWL, EWQ, EWU, EWH, INDA, EWA"
+# --- UNIFIED WATCHLISTS ---
 MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT, UUP, XME, SMH, SOXX, FTXL"
-DEEPVUE_THEMES = "BOAT, IBIT, WGMI, GDX, SIL, SMH, SOXX, FTXL, HACK, BOTZ, QTUM, TAN, XBI, IDNA, IYT, JETS, XHB, SLX, KRE, ITA, XME, KWEB, XLE, IHI, IGV"
+INDUSTRY_THEMES = "SMH, FTXL, HACK, IGV, BOTZ, QTUM, IBIT, WGMI, GDX, SIL, XME, SLX, TAN, XBI, IDNA, IYT, JETS, XHB, BOAT, BDRY, KRE, ITA, KWEB, XLE, OIH, IHI"
+INTL_COUNTRIES = "THD, EWZ, EWY, EWT, EWG, EWJ, EWC, EWW, EPU, ECH, ARGT, EZA, EIDO, EWM, EWP, EWL, EWQ, EWU, EWH, INDA, EWA"
 INCOME_STOCKS = "QDVO, CEFS, MLPX, AMLP, PBDC, PFFA, RLTY, UTF, ARCC, MAIN, FEPI, USCL.TO, BANK.TO"
 HARD_ASSETS = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, URNM, ZS=F, MOO, OIH"
-TV_INDUSTRIES = "BOAT, BDRY, XES, OIH, FLR, EVX, AMLP, VTI, TTD, VPP, SPGI, MAN, WSC, SYY, AVT, MCK, FI, ACN, IGV, FDN, UNH, THC, HCA, IQV, DIS, NXST, CHTR, NYT, EATZ, CRUZ, BETZ, PEJ, KR, CVS, M, WMT, NKE, HD, BBY, TSCO, ONLN, IYT"
 
 # --- SIDEBAR & CUSTOM LIST LOGIC ---
 with st.sidebar:
     st.header("🎯 Watchlist")
-    group_choice = st.radio("Choose Group:", ["Major Themes", "International Countries", "DeepVue Themes", "Hard Assets", "TV Industries", "Income Stocks", "Custom Manager"])
+    group_choice = st.radio("Choose Group:", ["Major Themes", "Industry Themes (Unified)", "International Countries", "Hard Assets", "Income Stocks", "Custom Manager"])
     
     tickers_input = ""
     if group_choice == "Custom Manager":
@@ -87,10 +85,9 @@ with st.sidebar:
     else:
         tickers_input = {
             "Major Themes": MAJOR_THEMES, 
+            "Industry Themes (Unified)": INDUSTRY_THEMES,
             "International Countries": INTL_COUNTRIES,
-            "DeepVue Themes": DEEPVUE_THEMES,
             "Hard Assets": HARD_ASSETS, 
-            "TV Industries": TV_INDUSTRIES,
             "Income Stocks": INCOME_STOCKS
         }.get(group_choice, "")
         tickers_input = st.text_area("Ticker Heap:", value=tickers_input, height=150)
@@ -136,23 +133,18 @@ def get_metrics(df_raw, ticker, bench_t, is_absolute):
         common = px.index.intersection(bx.index)
         if len(common) < LOOKBACK + 5: return None
         px_a, bx_a = px.loc[common], bx.loc[common]
-        
         rel_raw = (px_a / bx_a) * 100
-        rel = rel_raw.ewm(span=3).mean() # Light EMA smoothing
+        rel = rel_raw.ewm(span=3).mean() # Smoothing
         
         def standardize(series):
             return RRG_CENTER + ((series - series.rolling(LOOKBACK).mean()) / series.rolling(LOOKBACK).std().replace(0, EPSILON))
         
         ratio, mom = standardize(rel).clip(*Z_LIMITS), standardize(rel.diff(1)).clip(*Z_LIMITS)
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
-        
-        # Friday-Ending Label Fix
         if len(df_res) > 1:
             day_diff = (df_res['date'].iloc[1] - df_res['date'].iloc[0]).days
             df_res['display_date'] = df_res['date'] + pd.Timedelta(days=4) if day_diff >= 5 else df_res['date']
-        else:
-            df_res['display_date'] = df_res['date']
-            
+        else: df_res['display_date'] = df_res['date']
         df_res['date_str'] = df_res['display_date'].dt.strftime('%b %d, %Y')
         df_res['full_name'] = TICKER_NAMES.get(ticker, ticker)
         return df_res
@@ -177,7 +169,6 @@ def run_dual_analysis(ticker_str, bench, tf_display):
         res_d = get_metrics(data_d, t, bench_t, is_absolute)
         res_w = get_metrics(data_w, t, bench_t, is_absolute)
         res_display = res_d if tf_display == "Daily" else res_w
-        
         if res_display is not None and not res_display.empty:
             history_display[t] = res_display
             dr_d, dm_d = res_d['x'].iloc[-1], res_d['y'].iloc[-1]
@@ -185,19 +176,18 @@ def run_dual_analysis(ticker_str, bench, tf_display):
             heading = get_heading(res_display['x'].iloc[-2], res_display['y'].iloc[-2], res_display['x'].iloc[-1], res_display['y'].iloc[-1])
             velocity = np.sqrt((res_display['x'].iloc[-1] - res_display['x'].iloc[-2])**2 + (res_display['y'].iloc[-1] - res_display['y'].iloc[-2])**2)
             sync = "💎 BULLISH SYNC" if stg_d == "LEADING" and stg_w == "LEADING" else "📈 PULLBACK BUY" if stg_d == "IMPROVING" and stg_w == "LEADING" else "---"
-            
-            table_data.append({
-                "Ticker": t, "Full Name": TICKER_NAMES.get(t, t), "Sync Status": sync, 
-                "Daily Stage": stg_d, "Weekly Stage": stg_w, "Heading": heading, 
-                "Rotation Score": round((res_display['x'].iloc[-1] * 0.5) + (velocity * 2.0), 1)
-            })
+            table_data.append({"Ticker": t, "Full Name": TICKER_NAMES.get(t, t), "Sync Status": sync, "Daily Stage": stg_d, "Weekly Stage": stg_w, "Heading": heading, "Rotation Score": round((res_display['x'].iloc[-1] * 0.5) + (velocity * 2.0), 1)})
     return pd.DataFrame(table_data), history_display
 
 # --- DISPLAY ---
 try:
     df_main, hist = run_dual_analysis(tickers_input, benchmark, main_timeframe)
     if not df_main.empty:
-        to_plot = st.multiselect("Active Plotters:", options=list(hist.keys()), default=list(hist.keys()))
+        # Checkbox Logic Restored
+        col_t1, col_t2 = st.columns([1, 4])
+        with col_t1: show_all = st.checkbox("Show All Tickers", value=True)
+        default_selection = list(hist.keys()) if show_all else []
+        with col_t2: to_plot = st.multiselect("Active Plotters:", options=list(hist.keys()), default=default_selection)
         
         st.subheader(f"🌀 {main_timeframe} Chart Rotation vs {benchmark}")
         fig = go.Figure()
@@ -212,15 +202,15 @@ try:
             fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2.5, shape='spline'), showlegend=False))
             fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), text=[f"<b>{t}</b>"], textposition="top center", name=t))
         
-        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
+        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE), yaxis=dict(range=CHART_RANGE))
         st.plotly_chart(fig, use_container_width=True)
         
         st.subheader("📊 Dual-Timeframe Quant Grid")
         st.dataframe(df_main.sort_values(by='Rotation Score', ascending=False), use_container_width=True)
         
-        # DeepVue Theme Tracker (Heat Score)
+        # DeepVue Theme Tracker at the very bottom
         st.markdown("---")
-        st.subheader("🔥 DeepVue Theme Tracker (Heat Score)")
+        st.subheader("🔥 Industry Heat Score Tracker")
         theme_data = []
         total_p = 0
         for t, data in hist.items():
@@ -228,12 +218,9 @@ try:
             chg_1w = cx - data['x'].iloc[-2]
             is_p = 1 if cx >= POWER_WALK_LEVEL else 0
             total_p += is_p
-            theme_data.append({
-                "Theme": t, "Name": TICKER_NAMES.get(t, t), "RS": round(cx, 2), 
-                "1W Δ": round(chg_1w, 2), "Status": "🔥 ACCEL" if chg_1w > 0 else "🧊 COOL"
-            })
+            theme_data.append({"Ticker": t, "Industry/Name": TICKER_NAMES.get(t, t), "RS Ratio": round(cx, 2), "1W Δ": round(chg_1w, 2), "Status": "🔥 ACCEL" if chg_1w > 0 else "🧊 COOL"})
         
-        st.metric("Group Heat Score", f"{int((total_p/len(hist))*100)}%", help="Percentage of tickers in the Power Walk Zone")
+        st.metric("Group Heat Score", f"{int((total_p/len(hist))*100)}%")
         st.dataframe(pd.DataFrame(theme_data).sort_values("1W Δ", ascending=False), use_container_width=True)
-        
+
 except Exception as e: st.error(f"Error: {e}")
