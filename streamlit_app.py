@@ -87,7 +87,7 @@ with st.sidebar:
             if new_name:
                 hub_data[new_name] = tickers_input
                 if save_to_hub(hub_data):
-                    st.success(f"Saved to Cloud!")
+                    st.success(f"Synced to Cloud!")
                     time.sleep(1)
                     st.rerun()
     else:
@@ -103,27 +103,39 @@ with st.sidebar:
     main_timeframe = st.radio("Display Chart Timeframe:", ["Weekly", "Daily"], index=0)
     tail_len = st.slider("Tail Length:", 2, 30, 3)
 
-# --- ANALYTICS ---
+# --- ANALYTICS ENGINES ---
 @st.cache_data(ttl=600)
 def download_data(tickers, interval):
-    period, chunk_size, dfs = "2y", 25, []
+    period, chunk_size, dfs = "2y", 20, []
+    # Drop duplicates
+    tickers = list(set([t.strip().upper() for t in tickers if t.strip()]))
     for i in range(0, len(tickers), chunk_size):
         chunk = tickers[i:i + chunk_size]
         try:
-            data = yf.download(chunk, period=period, interval=interval, progress=False)
-            if not data.empty: dfs.append(data)
-            time.sleep(1.0) # Increased delay to prevent throttling
+            data = yf.download(chunk, period=period, interval=interval, progress=False, group_by='column')
+            if data is not None and not data.empty: 
+                dfs.append(data)
+            time.sleep(1.0) 
         except: pass
     return pd.concat(dfs, axis=1) if dfs else None
 
 def get_metrics(df_raw, ticker, bench_t, is_absolute):
+    # LAYER 1 PROTECTION: Check if primary object is None
+    if df_raw is None: return None
+    
+    # LAYER 2 PROTECTION: Check for 'Close' key safely
     try:
-        # SAFETY CHECK for NoneType Error
-        if df_raw is None or 'Close' not in df_raw or ticker not in df_raw['Close'].columns:
+        close_data = df_raw.get('Close')
+        if close_data is None or ticker not in close_data.columns:
             return None
+        
+        px = close_data[ticker].dropna()
+        if is_absolute:
+            bx = pd.Series(1.0, index=px.index)
+        else:
+            if bench_t not in close_data.columns: return None
+            bx = close_data[bench_t].dropna()
             
-        px = df_raw['Close'][ticker].dropna()
-        bx = pd.Series(1.0, index=px.index) if is_absolute else df_raw['Close'][bench_t].dropna()
         common = px.index.intersection(bx.index)
         if len(common) < LOOKBACK + 5: return None
         
@@ -142,8 +154,14 @@ def get_metrics(df_raw, ticker, bench_t, is_absolute):
 def run_dual_analysis(ticker_str, bench, tf_display):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
     bench_t, is_absolute = bench.strip().upper(), bench.strip().upper() == "ONE"
+    
+    # Layer 3 PROTECTION: Validate Download Returns
     data_d = download_data(list(set(tickers + ([bench_t] if not is_absolute else []))), "1d")
     data_w = download_data(list(set(tickers + ([bench_t] if not is_absolute else []))), "1wk")
+    
+    if data_d is None or data_w is None:
+        st.error("⚠️ Data connection lost or market closed. Try hitting 'Reset Engine' in the sidebar.")
+        return pd.DataFrame(), {}
     
     hist_out, table_data = {}, []
     for t in tickers:
@@ -181,7 +199,7 @@ try:
             fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2.5, shape='spline'), legendgroup=t, showlegend=False))
             fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), text=[f"<b>{t}</b>"], textposition="top center", legendgroup=t, name=t))
         
-        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE), yaxis=dict(range=CHART_RANGE))
+        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
         
         st.subheader("📊 Dual-Timeframe Quant Grid")
@@ -195,4 +213,6 @@ try:
             chg_1w = cx - data['x'].iloc[-2]
             theme_data.append({"Ticker": t, "Theme Description": TICKER_NAMES.get(t, t), "RS Ratio": round(cx, 2), "1W Δ": round(chg_1w, 2)})
         st.dataframe(pd.DataFrame(theme_data).sort_values("1W Δ", ascending=False), use_container_width=True)
-except Exception as e: st.error(f"Error: {e}")
+except Exception as e: 
+    if "NoneType" not in str(e): # Avoid redundant alerts
+        st.error(f"Error: {e}")
