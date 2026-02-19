@@ -4,23 +4,46 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
+import requests
+import json
 import time
-import os
-import glob
 
-# --- CONFIGURATION & CONSTANTS ---
+# --- CONFIGURATION ---
+# Using your existing Sita Hub URL
+GAS_URL = "https://script.google.com/macros/s/AKfycbxfcQoQCWnlbfOX8jIJKLAuc8VuWknXYQ5WQSKZhXywoHQRub91tyS6gRPBKqFrn01bWg/exec"
 LOOKBACK = 14
 RRG_CENTER = 100
 EPSILON = 1e-8
 Z_LIMITS = (80, 120)  
 CHART_RANGE = [96.5, 103.5] 
 POWER_WALK_LEVEL = 101.5
-WATCHLIST_DIR = "my_watchlists"
 
 st.set_page_config(page_title="Alpha-Scanner Pro", layout="wide")
 
-if not os.path.exists(WATCHLIST_DIR):
-    os.makedirs(WATCHLIST_DIR)
+# --- SITA HUB CLOUD FUNCTIONS ---
+def load_from_hub():
+    try:
+        # Your script returns all properties at once
+        response = requests.get(GAS_URL)
+        if response.status_code == 200:
+            all_data = response.json()
+            # We look specifically for the 'watchlists' key you've saved
+            watchlist_data = all_data.get('watchlists', "{}")
+            return json.loads(watchlist_data)
+        return {}
+    except Exception as e:
+        st.error(f"Hub Load Error: {e}")
+        return {}
+
+def save_to_hub(new_watchlists_dict):
+    try:
+        # Since your script saves the top-level keys, we wrap our dict in a string
+        payload = {"watchlists": json.dumps(new_watchlists_dict)}
+        response = requests.post(GAS_URL, data=json.dumps(payload))
+        return response.status_code == 200
+    except Exception as e:
+        st.error(f"Hub Save Error: {e}")
+        return False
 
 # --- MASTER TICKER DICTIONARY ---
 TICKER_NAMES = {
@@ -36,71 +59,58 @@ TICKER_NAMES = {
     "BDRY": "Dry Bulk Shipping", "BOAT": "Global Shipping ETF", "MOO": "Agribusiness",
     "GC=F": "Gold Futures", "SI=F": "Silver Futures", "HG=F": "Copper Futures", 
     "CL=F": "Crude Oil Futures", "BZ=F": "Brent Oil Futures", "NG=F": "Natural Gas Futures", 
-    "PL=F": "Platinum Futures", "PA=F": "Palladium Futures", "TIO=F": "Iron Ore Futures", 
     "ZS=F": "Soybean Futures", "ALB": "Albemarle (Lithium)", "URNM": "Uranium Miners", 
-    "OII": "Ocean Engineering", "OIH": "Oilfield Services",
     "THD": "Thailand", "EWZ": "Brazil", "EWY": "South Korea", "EWT": "Taiwan", "EWG": "Germany",
     "EWJ": "Japan", "EWC": "Canada", "EWW": "Mexico", "EPU": "Peru", "ECH": "Chile",
     "ARGT": "Argentina", "EZA": "South Africa", "EIDO": "Indonesia", "EWM": "Malaysia",
     "EWP": "Spain", "EWL": "Switzerland", "EWQ": "France", "EWU": "United Kingdom",
-    "EWH": "Hong Kong", "INDA": "India", "EWA": "Australia",
-    "USCL.TO": "Horizon US Large Cap", "BANK.TO": "Evolve Cdn Banks",
-    "WGMI": "Bitcoin Miners", "HACK": "Cybersecurity", "BOTZ": "Robotics & AI", 
-    "QTUM": "Quantum Computing", "TAN": "Solar", "IDNA": "Genomics", "JETS": "Airlines", 
-    "SLX": "Steel", "KRE": "Regional Banks", "ITA": "Aerospace & Defense", 
-    "KWEB": "China Internet", "IHI": "Medical Devices"
+    "EWH": "Hong Kong", "INDA": "India", "EWA": "Australia"
 }
 
-# --- WATCHLISTS ---
-MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT, UUP, XME, SMH, SOXX, FTXL"
+# --- PRE-SET WATCHLISTS ---
 INDUSTRY_THEMES = "SMH, FTXL, HACK, IGV, BOTZ, QTUM, IBIT, WGMI, GDX, SIL, XME, SLX, TAN, XBI, IDNA, IYT, JETS, XHB, BOAT, BDRY, KRE, ITA, KWEB, XLE, OIH, IHI"
 INTL_COUNTRIES = "THD, EWZ, EWY, EWT, EWG, EWJ, EWC, EWW, EPU, ECH, ARGT, EZA, EIDO, EWM, EWP, EWL, EWQ, EWU, EWH, INDA, EWA"
-INCOME_STOCKS = "QDVO, CEFS, MLPX, AMLP, PBDC, PFFA, RLTY, UTF, ARCC, MAIN, FEPI, USCL.TO, BANK.TO"
+MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT, UUP, XME, SMH, SOXX, FTXL"
 HARD_ASSETS = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, URNM, ZS=F, MOO, OIH"
-TV_INDUSTRIES = "BOAT, BDRY, XES, OIH, FLR, EVX, AMLP, VTI, TTD, VPP, SPGI, MAN, WSC, SYY, AVT, MCK, FI, ACN, IGV, FDN, UNH, THC, HCA, IQV, DIS, NXST, CHTR, NYT, EATZ, CRUZ, BETZ, PEJ, KR, CVS, M, WMT, NKE, HD, BBY, TSCO, ONLN, IYT"
 
-# --- SIDEBAR & CUSTOM LIST LOGIC ---
+# --- SIDEBAR & CLOUD MANAGER ---
 with st.sidebar:
     st.header("🎯 Watchlist")
-    group_choice = st.radio("Choose Group:", ["Major Themes", "Industry Themes (Unified)", "International Countries", "Hard Assets", "TV Industries", "Income Stocks", "Custom Manager"])
+    group_choice = st.radio("Choose Group:", ["Major Themes", "Industry Themes", "International Countries", "Hard Assets", "Sita Hub Manager"])
     
     tickers_input = ""
-    if group_choice == "Custom Manager":
-        saved_files = glob.glob(os.path.join(WATCHLIST_DIR, "*.txt"))
-        saved_names = [os.path.basename(f).replace(".txt", "") for f in saved_files]
-        selected_custom = st.selectbox("Your Saved Lists:", ["Create New..."] + saved_names)
+    if group_choice == "Sita Hub Manager":
+        hub_data = load_from_hub()
+        list_names = list(hub_data.keys())
+        
+        selected_list = st.selectbox("Saved in Sita Hub:", ["Create New..."] + list_names)
         
         initial_val = "AAPL, MSFT, GOOGL"
-        if selected_custom != "Create New...":
-            with open(os.path.join(WATCHLIST_DIR, f"{selected_custom}.txt"), "r") as f:
-                initial_val = f.read()
+        if selected_list != "Create New...":
+            initial_val = hub_data[selected_list]
         
         tickers_input = st.text_area("Edit Tickers:", value=initial_val, height=150)
-        new_name = st.text_input("Save As (Name):", value="" if selected_custom == "Create New..." else selected_custom)
-        if st.button("💾 Save List"):
+        new_name = st.text_input("List Name:", value="" if selected_list == "Create New..." else selected_list)
+        
+        if st.button("☁️ Sync to Sita Hub"):
             if new_name:
-                with open(os.path.join(WATCHLIST_DIR, f"{new_name}.txt"), "w") as f:
-                    f.write(tickers_input)
-                st.success(f"Saved '{new_name}'")
-                time.sleep(1)
-                st.rerun()
+                hub_data[new_name] = tickers_input
+                if save_to_hub(hub_data):
+                    st.success(f"Saved '{new_name}' to Cloud!")
+                    time.sleep(1)
+                    st.rerun()
     else:
         tickers_input = {
-            "Major Themes": MAJOR_THEMES, "Industry Themes (Unified)": INDUSTRY_THEMES,
-            "International Countries": INTL_COUNTRIES, "Hard Assets": HARD_ASSETS, 
-            "TV Industries": TV_INDUSTRIES, "Income Stocks": INCOME_STOCKS
+            "Major Themes": MAJOR_THEMES, "Industry Themes": INDUSTRY_THEMES,
+            "International Countries": INTL_COUNTRIES, "Hard Assets": HARD_ASSETS
         }.get(group_choice, "")
         tickers_input = st.text_area("Ticker Heap:", value=tickers_input, height=150)
 
     st.markdown("---")
-    auto_bench = "ONE" if group_choice in ["Hard Assets", "Income Stocks"] else "SPY"
+    auto_bench = "ONE" if group_choice in ["Hard Assets"] else "SPY"
     benchmark = st.text_input("Active Benchmark:", value=auto_bench)
     main_timeframe = st.radio("Display Chart Timeframe:", ["Weekly", "Daily"], index=0)
     tail_len = st.slider("Tail Length:", 2, 30, 3)
-    
-    if st.button("♻️ Reset Engine"):
-        st.cache_data.clear()
-        st.rerun()
 
 # --- ANALYTICS ENGINES ---
 def get_heading(x1, y1, x2, y2):
@@ -181,17 +191,15 @@ def run_dual_analysis(ticker_str, bench, tf_display):
 try:
     df_main, hist = run_dual_analysis(tickers_input, benchmark, main_timeframe)
     if not df_main.empty:
-        # --- BULLISH SYNC ALERT BOX ---
         sync_list = df_main[df_main['Sync Status'] == "💎 BULLISH SYNC"]['Ticker'].tolist()
         if sync_list:
-            st.success(f"💎 **BULLISH SYNC ALERT (Leading on Daily & Weekly):** {', '.join(sync_list)}")
+            st.success(f"💎 **BULLISH SYNC ALERT:** {', '.join(sync_list)}")
         
         col_t1, col_t2 = st.columns([1, 4])
         with col_t1: show_all = st.checkbox("Show All Tickers", value=True)
         default_selection = list(hist.keys()) if show_all else []
         with col_t2: to_plot = st.multiselect("Active Plotters:", options=list(hist.keys()), default=default_selection)
         
-        st.subheader(f"🌀 {main_timeframe} Chart Rotation vs {benchmark}")
         fig = go.Figure()
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
@@ -204,13 +212,12 @@ try:
             fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2.5, shape='spline'), showlegend=False))
             fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), text=[f"<b>{t}</b>"], textposition="top center", name=t))
         
-        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
+        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE), yaxis=dict(range=CHART_RANGE))
         st.plotly_chart(fig, use_container_width=True)
         
         st.subheader("📊 Dual-Timeframe Quant Grid")
         st.dataframe(df_main.sort_values(by='Rotation Score', ascending=False), use_container_width=True)
         
-        # Industry Heat Tracker
         st.markdown("---")
         st.subheader("🔥 Industry/Asset Heat Score Tracker")
         theme_data = []
@@ -222,7 +229,7 @@ try:
             total_p += is_p
             theme_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "RS Ratio": round(cx, 2), "1W Δ": round(chg_1w, 2), "Status": "🔥 ACCEL" if chg_1w > 0 else "🧊 COOL"})
         
-        st.metric("Group Heat Score", f"{int((total_p/len(hist))*100)}%", help="Percentage of group in Power Walk Zone")
+        st.metric("Group Heat Score", f"{int((total_p/len(hist))*100)}%")
         st.dataframe(pd.DataFrame(theme_data).sort_values("1W Δ", ascending=False), use_container_width=True)
 
 except Exception as e: st.error(f"Error: {e}")
