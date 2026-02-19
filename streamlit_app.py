@@ -28,19 +28,18 @@ def load_from_hub():
             watchlist_data = all_data.get('watchlists', "{}")
             return json.loads(watchlist_data)
         return {}
-    except:
-        return {}
+    except: return {}
 
 def save_to_hub(new_watchlists_dict):
     try:
         payload = {"watchlists": json.dumps(new_watchlists_dict)}
         response = requests.post(GAS_URL, data=json.dumps(payload))
         return response.status_code == 200
-    except:
-        return False
+    except: return False
 
 # --- MASTER TICKER DICTIONARY ---
 TICKER_NAMES = {
+    # Core Sectors
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
     "GLD": "Gold ETF", "SLV": "Silver ETF", "COPX": "Copper Miners", "XLE": "Energy",
@@ -51,9 +50,19 @@ TICKER_NAMES = {
     "SOXX": "Memory/Broad Semi", "FTXL": "Memory Super-Cycle (MU/WDC)", "IGV": "Software", 
     "XHB": "Home Construction", "IBIT": "Bitcoin Trust", "XME": "S&P Metals & Mining",
     "BDRY": "Dry Bulk Shipping", "BOAT": "Global Shipping ETF", "MOO": "Agribusiness",
+    # Modern Warfare & Defense
+    "JEDI": "Modern Warfare & Drones", "DRNZ": "Drone Tech (REX)", "ITA": "Aerospace & Defense",
+    # Power & AI Infrastructure
+    "POWR": "U.S. Power/Grid Infra", "PAVE": "U.S. Infrastructure Dev", 
+    # Critical Minerals & Strategic Assets
+    "REMX": "Rare Earth/Strategic Metals", "URNM": "Uranium Miners", "ALB": "Lithium",
+    # Health & Innovation
+    "OZEM": "GLP-1 & Weight Loss", "IHI": "Medical Devices", "XBI": "Biotechnology",
+    # Hard Assets (Commodities)
     "GC=F": "Gold Futures", "SI=F": "Silver Futures", "HG=F": "Copper Futures", 
     "CL=F": "Crude Oil Futures", "BZ=F": "Brent Oil Futures", "NG=F": "Natural Gas Futures", 
-    "ZS=F": "Soybean Futures", "ALB": "Albemarle (Lithium)", "URNM": "Uranium Miners", 
+    "ZS=F": "Soybean Futures",
+    # International Countries
     "THD": "Thailand", "EWZ": "Brazil", "EWY": "South Korea", "EWT": "Taiwan", "EWG": "Germany",
     "EWJ": "Japan", "EWC": "Canada", "EWW": "Mexico", "EPU": "Peru", "ECH": "Chile",
     "ARGT": "Argentina", "EZA": "South Africa", "EIDO": "Indonesia", "EWM": "Malaysia",
@@ -62,7 +71,7 @@ TICKER_NAMES = {
 }
 
 # --- WATCHLISTS ---
-INDUSTRY_THEMES = "SMH, FTXL, HACK, IGV, BOTZ, QTUM, IBIT, WGMI, GDX, SIL, XME, SLX, TAN, XBI, IDNA, IYT, JETS, XHB, BOAT, BDRY, KRE, ITA, KWEB, XLE, OIH, IHI"
+INDUSTRY_THEMES = "SMH, FTXL, HACK, IGV, BOTZ, JEDI, DRNZ, POWR, PAVE, REMX, OZEM, QTUM, IBIT, WGMI, GDX, SIL, XME, SLX, TAN, XBI, IDNA, IYT, JETS, XHB, BOAT, BDRY, KRE, ITA, KWEB, XLE, OIH, IHI"
 INTL_COUNTRIES = "THD, EWZ, EWY, EWT, EWG, EWJ, EWC, EWW, EPU, ECH, ARGT, EZA, EIDO, EWM, EWP, EWL, EWQ, EWU, EWH, INDA, EWA"
 MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT, UUP, XME, SMH, SOXX, FTXL"
 HARD_ASSETS = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, URNM, ZS=F, MOO, OIH"
@@ -101,7 +110,7 @@ with st.sidebar:
     main_timeframe = st.radio("Display Chart Timeframe:", ["Weekly", "Daily"], index=0)
     tail_len = st.slider("Tail Length:", 2, 30, 3)
 
-# --- ANALYTICS ---
+# --- ANALYTICS ENGINES ---
 @st.cache_data(ttl=600)
 def download_data(tickers, interval):
     period, chunk_size, dfs = "2y", 25, []
@@ -116,6 +125,7 @@ def download_data(tickers, interval):
 
 def get_metrics(df_raw, ticker, bench_t, is_absolute):
     try:
+        if ticker not in df_raw['Close'].columns: return None
         px = df_raw['Close'][ticker].dropna()
         bx = pd.Series(1.0, index=px.index) if is_absolute else df_raw['Close'][bench_t].dropna()
         common = px.index.intersection(bx.index)
@@ -176,32 +186,25 @@ try:
         for i, t in enumerate(to_plot):
             df_p = hist[t].iloc[-min(tail_len, len(hist[t])):]
             color = px.colors.qualitative.Alphabet[i % 26]
-            
-            # --- FIX: Grouping traces so legend click isolates correctly ---
-            fig.add_trace(go.Scatter(
-                x=df_p['x'], y=df_p['y'], mode='lines', 
-                line=dict(color=color, width=2.5, shape='spline'), 
-                legendgroup=t, showlegend=False, hoverinfo='skip'
-            ))
-            fig.add_trace(go.Scatter(
-                x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], 
-                mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')),
-                text=[f"<b>{t}</b>"], textposition="top center", 
-                legendgroup=t, name=t
-            ))
+            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2.5, shape='spline'), legendgroup=t, showlegend=False))
+            fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), text=[f"<b>{t}</b>"], textposition="top center", legendgroup=t, name=t))
         
-        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE), yaxis=dict(range=CHART_RANGE))
+        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
+        
         st.subheader("📊 Dual-Timeframe Quant Grid")
         st.dataframe(df_main.sort_values(by='Rotation Score', ascending=False), use_container_width=True)
         
         st.markdown("---")
-        st.subheader("🔥 Industry/Asset Heat Score Tracker")
+        st.subheader("🔥 Industry Heat Score Tracker")
         theme_data = []
+        total_p = 0
         for t, data in hist.items():
             cx = data['x'].iloc[-1]
             chg_1w = cx - data['x'].iloc[-2]
-            theme_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "RS Ratio": round(cx, 2), "1W Δ": round(chg_1w, 2)})
+            is_p = 1 if cx >= POWER_WALK_LEVEL else 0
+            total_p += is_p
+            theme_data.append({"Ticker": t, "Theme Description": TICKER_NAMES.get(t, t), "RS Ratio": round(cx, 2), "1W Δ": round(chg_1w, 2), "Status": "🔥 ACCEL" if chg_1w > 0 else "🧊 COOL"})
+        st.metric("Group Heat Score", f"{int((total_p/len(hist))*100)}%", help="Percentage of group in Power Walk Zone")
         st.dataframe(pd.DataFrame(theme_data).sort_values("1W Δ", ascending=False), use_container_width=True)
-
 except Exception as e: st.error(f"Error: {e}")
