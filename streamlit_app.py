@@ -101,7 +101,7 @@ with st.sidebar:
     auto_bench = "ONE" if group_choice in ["Hard Assets"] else "SPY"
     benchmark = st.text_input("Active Benchmark:", value=auto_bench)
     main_timeframe = st.radio("Display Chart Timeframe:", ["Weekly", "Daily"], index=0)
-    tail_len = st.slider("Tail Length:", 2, 30, 3)
+    tail_len = st.slider("Tail Length:", 2, 30, 6) # Adjusted default to match lookback
     if st.button("♻️ Reset Engine"):
         st.cache_data.clear()
         st.rerun()
@@ -127,14 +127,15 @@ def download_data(tickers, interval):
 def get_metrics(df_raw, ticker, bench_t, is_absolute, timeframe_choice):
     if df_raw is None or ticker not in df_raw.columns: return None
     
-    # --- ADAPTIVE LOOKBACK ---
-    # Shorter for Daily (8) to catch V-shapes; 10 for Weekly to catch Swing moves.
-    current_lookback = 8 if timeframe_choice == "Daily" else 10
+    # --- ULTRA-FAST 6-PERIOD LOOKBACK ---
+    # 6 weeks for Weekly; 6 days for Daily
+    current_lookback = 6
     
     try:
         px = df_raw[ticker].dropna()
         bx = pd.Series(1.0, index=px.index) if is_absolute else df_raw[bench_t].dropna()
         common = px.index.intersection(bx.index)
+        
         if len(common) < current_lookback + 5: return None
         
         rel = ((px.loc[common] / bx.loc[common]) * 100).ewm(span=3).mean() 
@@ -185,14 +186,27 @@ try:
         for i, t in enumerate(to_plot):
             df_p = hist[t].iloc[-min(tail_len, len(hist[t])):]
             color = px.colors.qualitative.Alphabet[i % 26]
-            # Fix: Grouping for legend isolation
-            fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines', line=dict(color=color, width=2.5, shape='spline'), legendgroup=t, showlegend=False))
-            fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), text=[f"<b>{t}</b>"], textposition="top center", legendgroup=t, name=t))
+            
+            # --- LINES + DOTS ON EVERY POINT ---
+            fig.add_trace(go.Scatter(
+                x=df_p['x'], y=df_p['y'], mode='lines+markers', 
+                marker=dict(size=6, color=color, opacity=0.5), # Markers on points
+                line=dict(color=color, width=2, shape='spline'), 
+                legendgroup=t, showlegend=False, hoverinfo='skip'
+            ))
+            # Main diamond head
+            fig.add_trace(go.Scatter(
+                x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], 
+                mode='markers+text', 
+                marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')),
+                text=[f"<b>{t}</b>"], textposition="top center", 
+                legendgroup=t, name=t
+            ))
         
         fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
         
-        st.subheader("📊 High-Velocity Rotation Grid")
+        st.subheader("📊 High-Frequency Rotation Grid")
         st.dataframe(df_main.sort_values(by='Rotation Score', ascending=False), use_container_width=True)
         
         st.markdown("---")
