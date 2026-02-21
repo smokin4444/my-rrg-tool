@@ -55,11 +55,12 @@ TICKER_NAMES = {
     "OZEM": "GLP-1 & Weight Loss", "IHI": "Medical Devices", "XBI": "Biotechnology",
     "GC=F": "Gold Futures", "SI=F": "Silver Futures", "HG=F": "Copper Futures", 
     "CL=F": "Crude Oil Futures", "BZ=F": "Brent Oil Futures", "NG=F": "Natural Gas Futures", 
-    "ZS=F": "Soybean Futures", "THD": "Thailand", "EWZ": "Brazil", "EWY": "South Korea", 
-    "EWT": "Taiwan", "EWG": "Germany", "EWJ": "Japan", "EWC": "Canada", "EWW": "Mexico", 
-    "EPU": "Peru", "ECH": "Chile", "ARGT": "Argentina", "EZA": "South Africa", 
-    "EIDO": "Indonesia", "EWM": "Malaysia", "EWP": "Spain", "EWL": "Switzerland", 
-    "EWQ": "France", "EWU": "United Kingdom", "EWH": "Hong Kong", "INDA": "India", "EWA": "Australia"
+    "ZS=F": "Soybean Futures",
+    "THD": "Thailand", "EWZ": "Brazil", "EWY": "South Korea", "EWT": "Taiwan", "EWG": "Germany",
+    "EWJ": "Japan", "EWC": "Canada", "EWW": "Mexico", "EPU": "Peru", "ECH": "Chile",
+    "ARGT": "Argentina", "EZA": "South Africa", "EIDO": "Indonesia", "EWM": "Malaysia",
+    "EWP": "Spain", "EWL": "Switzerland", "EWQ": "France", "EWU": "United Kingdom",
+    "EWH": "Hong Kong", "INDA": "India", "EWA": "Australia"
 }
 
 # --- WATCHLISTS ---
@@ -99,7 +100,7 @@ with st.sidebar:
     st.markdown("---")
     st.header("⚙️ Engine Settings")
     
-    # --- SPEED DIAL ---
+    # --- SCANNER SPEED DIAL ---
     scanner_speed = st.select_slider(
         "Scanner Speed:",
         options=["Fast (Swing)", "Agile (Standard)", "Structural (Macro)"],
@@ -108,9 +109,9 @@ with st.sidebar:
     
     main_timeframe = st.radio("Display Chart Timeframe:", ["Weekly", "Daily"], index=0)
 
-    # Resolve Lookback Values
+    # Resolution Logic with Stability Floor (Min 5)
     if scanner_speed == "Fast (Swing)":
-        d_look, w_look = 5, 2
+        d_look, w_look = 5, 5
     elif scanner_speed == "Agile (Standard)":
         d_look, w_look = 6, 6
     else:
@@ -127,7 +128,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- ANALYTICS ---
+# --- ANALYTICS ENGINES ---
 @st.cache_data(ttl=600)
 def download_data(tickers, interval):
     period, chunk_size, dfs = "2y", 10, []
@@ -151,6 +152,8 @@ def get_metrics(df_raw, ticker, bench_t, is_absolute, lookback_val):
         px = df_raw[ticker].dropna()
         bx = pd.Series(1.0, index=px.index) if is_absolute else df_raw[bench_t].dropna()
         common = px.index.intersection(bx.index)
+        
+        # Guard against sample size smaller than lookback
         if len(common) < lookback_val + 5: return None
         
         rel = ((px.loc[common] / bx.loc[common]) * 100).ewm(span=3).mean() 
@@ -201,12 +204,15 @@ try:
         for i, t in enumerate(to_plot):
             df_p = hist[t].iloc[-min(tail_len, len(hist[t])):]
             color = px.colors.qualitative.Alphabet[i % 26]
+            
+            # Lines + Velocity Dots
             fig.add_trace(go.Scatter(
                 x=df_p['x'], y=df_p['y'], mode='lines+markers', 
                 marker=dict(size=6, color=color, opacity=0.5),
                 line=dict(color=color, width=2, shape='spline'), 
                 legendgroup=t, showlegend=False, hoverinfo='skip'
             ))
+            # Current Head
             fig.add_trace(go.Scatter(
                 x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], 
                 mode='markers+text', 
@@ -218,7 +224,7 @@ try:
         fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
         
-        st.subheader(f"📊 {scanner_speed} Rotation Grid")
+        st.subheader(f"📊 {scanner_speed} Grid (Lookback: {active_lookback})")
         st.dataframe(df_main.sort_values(by='Rotation Score', ascending=False), use_container_width=True)
         
         st.markdown("---")
