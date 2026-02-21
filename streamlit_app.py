@@ -55,12 +55,11 @@ TICKER_NAMES = {
     "OZEM": "GLP-1 & Weight Loss", "IHI": "Medical Devices", "XBI": "Biotechnology",
     "GC=F": "Gold Futures", "SI=F": "Silver Futures", "HG=F": "Copper Futures", 
     "CL=F": "Crude Oil Futures", "BZ=F": "Brent Oil Futures", "NG=F": "Natural Gas Futures", 
-    "ZS=F": "Soybean Futures",
-    "THD": "Thailand", "EWZ": "Brazil", "EWY": "South Korea", "EWT": "Taiwan", "EWG": "Germany",
-    "EWJ": "Japan", "EWC": "Canada", "EWW": "Mexico", "EPU": "Peru", "ECH": "Chile",
-    "ARGT": "Argentina", "EZA": "South Africa", "EIDO": "Indonesia", "EWM": "Malaysia",
-    "EWP": "Spain", "EWL": "Switzerland", "EWQ": "France", "EWU": "United Kingdom",
-    "EWH": "Hong Kong", "INDA": "India", "EWA": "Australia"
+    "ZS=F": "Soybean Futures", "THD": "Thailand", "EWZ": "Brazil", "EWY": "South Korea", 
+    "EWT": "Taiwan", "EWG": "Germany", "EWJ": "Japan", "EWC": "Canada", "EWW": "Mexico", 
+    "EPU": "Peru", "ECH": "Chile", "ARGT": "Argentina", "EZA": "South Africa", 
+    "EIDO": "Indonesia", "EWM": "Malaysia", "EWP": "Spain", "EWL": "Switzerland", 
+    "EWQ": "France", "EWU": "United Kingdom", "EWH": "Hong Kong", "INDA": "India", "EWA": "Australia"
 }
 
 # --- WATCHLISTS ---
@@ -98,10 +97,32 @@ with st.sidebar:
         tickers_input = st.text_area("Ticker Heap:", value=tickers_input, height=150)
 
     st.markdown("---")
+    st.header("⚙️ Engine Settings")
+    
+    # --- SPEED DIAL ---
+    scanner_speed = st.select_slider(
+        "Scanner Speed:",
+        options=["Fast (Swing)", "Agile (Standard)", "Structural (Macro)"],
+        value="Agile (Standard)"
+    )
+    
+    main_timeframe = st.radio("Display Chart Timeframe:", ["Weekly", "Daily"], index=0)
+
+    # Resolve Lookback Values
+    if scanner_speed == "Fast (Swing)":
+        d_look, w_look = 5, 2
+    elif scanner_speed == "Agile (Standard)":
+        d_look, w_look = 6, 6
+    else:
+        d_look, w_look = 14, 14
+        
+    active_lookback = d_look if main_timeframe == "Daily" else w_look
+    st.caption(f"Active Lookback: {active_lookback} periods")
+
     auto_bench = "ONE" if group_choice in ["Hard Assets"] else "SPY"
     benchmark = st.text_input("Active Benchmark:", value=auto_bench)
-    main_timeframe = st.radio("Display Chart Timeframe:", ["Weekly", "Daily"], index=0)
-    tail_len = st.slider("Tail Length:", 2, 30, 6) # Adjusted default to match lookback
+    tail_len = st.slider("Tail Length:", 2, 30, active_lookback)
+    
     if st.button("♻️ Reset Engine"):
         st.cache_data.clear()
         st.rerun()
@@ -124,22 +145,16 @@ def download_data(tickers, interval):
         except: pass
     return pd.concat(dfs, axis=1) if dfs else None
 
-def get_metrics(df_raw, ticker, bench_t, is_absolute, timeframe_choice):
+def get_metrics(df_raw, ticker, bench_t, is_absolute, lookback_val):
     if df_raw is None or ticker not in df_raw.columns: return None
-    
-    # --- ULTRA-FAST 6-PERIOD LOOKBACK ---
-    # 6 weeks for Weekly; 6 days for Daily
-    current_lookback = 6
-    
     try:
         px = df_raw[ticker].dropna()
         bx = pd.Series(1.0, index=px.index) if is_absolute else df_raw[bench_t].dropna()
         common = px.index.intersection(bx.index)
-        
-        if len(common) < current_lookback + 5: return None
+        if len(common) < lookback_val + 5: return None
         
         rel = ((px.loc[common] / bx.loc[common]) * 100).ewm(span=3).mean() 
-        def standardize(s): return RRG_CENTER + ((s - s.rolling(current_lookback).mean()) / s.rolling(current_lookback).std().replace(0, EPSILON))
+        def standardize(s): return RRG_CENTER + ((s - s.rolling(lookback_val).mean()) / s.rolling(lookback_val).std().replace(0, EPSILON))
         ratio, mom = standardize(rel).clip(*Z_LIMITS), standardize(rel.diff(1)).clip(*Z_LIMITS)
         df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
         
@@ -150,7 +165,7 @@ def get_metrics(df_raw, ticker, bench_t, is_absolute, timeframe_choice):
         return df_res
     except: return None
 
-def run_dual_analysis(ticker_str, bench, tf_display):
+def run_dual_analysis(ticker_str, bench, tf_display, lookback_val):
     tickers = [t.strip().upper() for t in ticker_str.split(",") if t.strip()]
     bench_t, is_absolute = bench.strip().upper(), bench.strip().upper() == "ONE"
     interval = "1d" if tf_display == "Daily" else "1wk"
@@ -160,7 +175,7 @@ def run_dual_analysis(ticker_str, bench, tf_display):
     
     hist_out, table_data = {}, []
     for t in tickers:
-        res = get_metrics(data_all, t, bench_t, is_absolute, tf_display)
+        res = get_metrics(data_all, t, bench_t, is_absolute, lookback_val)
         if res is not None:
             hist_out[t] = res
             x, y = res['x'].iloc[-1], res['y'].iloc[-1]
@@ -171,7 +186,7 @@ def run_dual_analysis(ticker_str, bench, tf_display):
 
 # --- DISPLAY ---
 try:
-    df_main, hist = run_dual_analysis(tickers_input, benchmark, main_timeframe)
+    df_main, hist = run_dual_analysis(tickers_input, benchmark, main_timeframe, active_lookback)
     if not df_main.empty:
         col_t1, col_t2 = st.columns([1, 4])
         with col_t1: show_all = st.checkbox("Show All Tickers", value=True)
@@ -186,15 +201,12 @@ try:
         for i, t in enumerate(to_plot):
             df_p = hist[t].iloc[-min(tail_len, len(hist[t])):]
             color = px.colors.qualitative.Alphabet[i % 26]
-            
-            # --- LINES + DOTS ON EVERY POINT ---
             fig.add_trace(go.Scatter(
                 x=df_p['x'], y=df_p['y'], mode='lines+markers', 
-                marker=dict(size=6, color=color, opacity=0.5), # Markers on points
+                marker=dict(size=6, color=color, opacity=0.5),
                 line=dict(color=color, width=2, shape='spline'), 
                 legendgroup=t, showlegend=False, hoverinfo='skip'
             ))
-            # Main diamond head
             fig.add_trace(go.Scatter(
                 x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], 
                 mode='markers+text', 
@@ -206,7 +218,7 @@ try:
         fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
         
-        st.subheader("📊 High-Frequency Rotation Grid")
+        st.subheader(f"📊 {scanner_speed} Rotation Grid")
         st.dataframe(df_main.sort_values(by='Rotation Score', ascending=False), use_container_width=True)
         
         st.markdown("---")
