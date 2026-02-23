@@ -41,7 +41,7 @@ def save_to_hub(new_watchlists_dict):
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
-    "GLD": "Gold ETF", "SLV": "Silver ETF", "COPX": "Copper Miners", "XLE": "Energy",
+    "GLD": "Gold ETF", "SLV": "Silver ETF", "COPX": "Global Copper Miners", "XLE": "Energy",
     "XLK": "Technology", "XLY": "Consumer Durables", "XLC": "Communications", 
     "XLF": "Finance", "XLI": "Producer Manufacturing", 
     "XLV": "Health Services", "XLP": "Cons Staples", "XLU": "Utilities", 
@@ -51,20 +51,20 @@ TICKER_NAMES = {
     "BDRY": "Dry Bulk Shipping", "BOAT": "Global Shipping ETF", "MOO": "Agribusiness",
     "JEDI": "Modern Warfare & Drones", "DRNZ": "Drone Tech (REX)", "ITA": "Aerospace & Defense",
     "POWR": "U.S. Power/Grid Infra", "PAVE": "U.S. Infrastructure Dev", 
-    "REMX": "Rare Earth/Strategic Metals", "URNM": "Uranium Miners", "ALB": "Lithium",
+    "REMX": "Rare Earth/Strategic Metals", "URNM": "Uranium Miners (Nuclear)", "ALB": "Lithium",
     "OZEM": "GLP-1 & Weight Loss", "IHI": "Medical Devices", "XBI": "Biotechnology",
     "GC=F": "Gold Futures", "SI=F": "Silver Futures", "HG=F": "Copper Futures", 
     "CL=F": "Crude Oil Futures", "BZ=F": "Brent Oil Futures", "NG=F": "Natural Gas Futures", 
-    "ZS=F": "Soybean Futures",
-    "THD": "Thailand", "EWZ": "Brazil", "EWY": "South Korea", "EWT": "Taiwan", "EWG": "Germany",
+    "ZS=F": "Soybean Futures", "GEV": "GE Vernova (Grid/Power)", "THD": "Thailand", 
+    "EWZ": "Brazil", "EWY": "South Korea", "EWT": "Taiwan", "EWG": "Germany",
     "EWJ": "Japan", "EWC": "Canada", "EWW": "Mexico", "EPU": "Peru", "ECH": "Chile",
     "ARGT": "Argentina", "EZA": "South Africa", "EIDO": "Indonesia", "EWM": "Malaysia",
     "EWP": "Spain", "EWL": "Switzerland", "EWQ": "France", "EWU": "United Kingdom",
-    "EWH": "Hong Kong", "INDA": "India", "EWA": "Australia"
+    "EWH": "Hong Kong", "INDA": "India", "EWA": "Australia", "KWEB": "China Internet"
 }
 
 # --- WATCHLISTS ---
-INDUSTRY_THEMES = "SMH, FTXL, HACK, IGV, BOTZ, JEDI, DRNZ, POWR, PAVE, REMX, OZEM, QTUM, IBIT, WGMI, GDX, SIL, XME, SLX, TAN, XBI, IDNA, IYT, JETS, XHB, BOAT, BDRY, KRE, ITA, KWEB, XLE, OIH, IHI"
+INDUSTRY_THEMES = "SMH, GEV, COPX, URNM, BOAT, BDRY, POWR, PAVE, REMX, OZEM, JEDI, DRNZ, HACK, IGV, BOTZ, QTUM, IBIT, WGMI, GDX, SIL, XME, SLX, TAN, XBI, IDNA, IYT, JETS, XHB, KRE, ITA, KWEB, XLE, OIH, IHI"
 INTL_COUNTRIES = "THD, EWZ, EWY, EWT, EWG, EWJ, EWC, EWW, EPU, ECH, ARGT, EZA, EIDO, EWM, EWP, EWL, EWQ, EWU, EWH, INDA, EWA"
 MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT, UUP, XME, SMH, SOXX, FTXL"
 HARD_ASSETS = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, URNM, ZS=F, MOO, OIH"
@@ -100,7 +100,6 @@ with st.sidebar:
     st.markdown("---")
     st.header("⚙️ Engine Settings")
     
-    # --- SCANNER SPEED DIAL ---
     scanner_speed = st.select_slider(
         "Scanner Speed:",
         options=["Fast (Swing)", "Agile (Standard)", "Structural (Macro)"],
@@ -152,8 +151,6 @@ def get_metrics(df_raw, ticker, bench_t, is_absolute, lookback_val):
         px = df_raw[ticker].dropna()
         bx = pd.Series(1.0, index=px.index) if is_absolute else df_raw[bench_t].dropna()
         common = px.index.intersection(bx.index)
-        
-        # Guard against sample size smaller than lookback
         if len(common) < lookback_val + 5: return None
         
         rel = ((px.loc[common] / bx.loc[common]) * 100).ewm(span=3).mean() 
