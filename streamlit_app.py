@@ -17,23 +17,6 @@ RRG_CENTER, EPSILON = 100, 1e-8
 Z_LIMITS = (80, 120)  
 CHART_RANGE = [96.5, 103.5] 
 
-# --- SITA HUB SYNC ---
-def load_from_hub():
-    try:
-        response = requests.get(GAS_URL, timeout=10)
-        if response.status_code == 200:
-            all_data = response.json()
-            return json.loads(all_data.get('watchlists', "{}"))
-        return {}
-    except: return {}
-
-def save_to_hub(new_watchlists_dict):
-    try:
-        payload = {"watchlists": json.dumps(new_watchlists_dict)}
-        response = requests.post(GAS_URL, data=json.dumps(payload), timeout=10)
-        return response.status_code == 200
-    except: return False
-
 # --- MASTER TICKER DICTIONARY ---
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
@@ -56,24 +39,13 @@ HARD_ASSETS = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, URNM,
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("🎯 Watchlist")
-    group_choice = st.radio("Choose Group:", ["Major Themes", "Industry Themes", "International Countries", "Hard Assets", "Sita Hub Manager"])
+    group_choice = st.radio("Choose Group:", ["Major Themes", "Industry Themes", "International Countries", "Hard Assets"])
     
-    if group_choice == "Sita Hub Manager":
-        hub_data = load_from_hub()
-        selected_list = st.selectbox("Saved Lists:", ["Create New..."] + list(hub_data.keys()))
-        initial_val = hub_data.get(selected_list, "AAPL, MSFT")
-        tickers_input = st.text_area("Edit Tickers:", value=initial_val, height=150)
-        new_name = st.text_input("List Name:", value="" if selected_list == "Create New..." else selected_list)
-        if st.button("☁️ Sync to Hub"):
-            if new_name:
-                hub_data[new_name] = tickers_input
-                if save_to_hub(hub_data): st.success("Synced!"); time.sleep(1); st.rerun()
-    else:
-        tickers_input = {
-            "Major Themes": MAJOR_THEMES, "Industry Themes": INDUSTRY_THEMES,
-            "International Countries": INTL_COUNTRIES, "Hard Assets": HARD_ASSETS
-        }.get(group_choice, "")
-        tickers_input = st.text_area("Ticker Heap:", value=tickers_input, height=150)
+    tickers_input = {
+        "Major Themes": MAJOR_THEMES, "Industry Themes": INDUSTRY_THEMES,
+        "International Countries": INTL_COUNTRIES, "Hard Assets": HARD_ASSETS
+    }.get(group_choice, "")
+    tickers_input = st.text_area("Ticker Heap:", value=tickers_input, height=150)
 
     st.markdown("---")
     st.header("⚙️ Engine Settings")
@@ -114,7 +86,6 @@ full_ticker_set = list(set(tickers_list + ([benchmark.upper()] if benchmark.uppe
 interval = "1d" if main_timeframe == "Daily" else "1wk"
 data_all = download_data(full_ticker_set, interval)
 
-# CREATE TABS
 tab1, tab2 = st.tabs(["🌀 Relative Rotation (RRG)", "🏦 Capital Flow Leaders"])
 
 with tab1:
@@ -136,7 +107,6 @@ with tab1:
 
 with tab2:
     st.subheader("🏦 Capital Flow Scorecard")
-    st.markdown("Scores reflect institutional accumulation. 80+ is Strong, 40-60 is Consolidation.")
     if data_all is not None:
         flow_data = []
         for t in tickers_list:
@@ -145,24 +115,19 @@ with tab2:
                 bx = pd.Series(1.0, index=px.index) if benchmark.upper() == "ONE" else data_all[benchmark.upper()].dropna()
                 common = px.index.intersection(bx.index)
                 
-                sma20 = px.loc[common].rolling(20).mean()
-                trend_dist = (px.loc[common].iloc[-1] / sma20.iloc[-1]) - 1
-                rel_s = (px.loc[common] / bx.loc[common])
-                rs_mom = (rel_s.iloc[-1] / rel_s.iloc[-5]) - 1
-                
-                # --- NUANCED SCORING ENGINE ---
-                # Blend: 40% Trend, 60% Relative Momentum
-                raw_blend = (trend_dist * 1.5) + (rs_mom * 2.5)
-                # Map range (-0.15 to +0.15) into (0 to 100)
-                score = int(np.clip((raw_blend + 0.10) / 0.20, 0, 1) * 100)
-                
-                flow_data.append({
-                    "Ticker": t, 
-                    "Name": TICKER_NAMES.get(t, t), 
-                    "Flow Score": score, 
-                    "Trend %": round(trend_dist*100, 1), 
-                    "RS Δ": round(rs_mom*100, 1),
-                    "Status": "🔥 ACCUMULATION" if score > 80 else "⚖️ HOLD" if score > 40 else "⚠️ DISTRIBUTION"
-                })
+                if len(common) > 20:
+                    sma20 = px.loc[common].rolling(20).mean()
+                    trend_dist = (px.loc[common].iloc[-1] / sma20.iloc[-1]) - 1
+                    rel_s = (px.loc[common] / bx.loc[common])
+                    rs_mom = (rel_s.iloc[-1] / rel_s.iloc[-5]) - 1
+                    
+                    # --- ANTI-CRASH SANITIZER ---
+                    trend_dist = 0 if np.isnan(trend_dist) else trend_dist
+                    rs_mom = 0 if np.isnan(rs_mom) else rs_mom
+                    
+                    raw_blend = (trend_dist * 1.5) + (rs_mom * 2.5)
+                    score = int(np.clip((raw_blend + 0.10) / 0.20, 0, 1) * 100)
+                    
+                    flow_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Flow Score": score, "Trend %": round(trend_dist*100, 1), "RS Δ": round(rs_mom*100, 1), "Status": "🔥 ACCUMULATION" if score > 80 else "⚖️ HOLD" if score > 40 else "⚠️ DISTRIBUTION"})
         
         st.dataframe(pd.DataFrame(flow_data).sort_values("Flow Score", ascending=False), use_container_width=True)
