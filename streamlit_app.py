@@ -16,9 +16,8 @@ GAS_URL = "https://script.google.com/macros/s/AKfycbxfcQoQCWnlbfOX8jIJKLAuc8VuWk
 RRG_CENTER, EPSILON = 100, 1e-8
 Z_LIMITS = (80, 120)  
 CHART_RANGE = [96.5, 103.5] 
-POWER_WALK_LEVEL = 101.5
 
-# --- TICKER DICTIONARY ---
+# --- MASTER TICKER DICTIONARY ---
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
@@ -31,7 +30,7 @@ TICKER_NAMES = {
     "POWR": "U.S. Power/Grid Infra", "URNM": "Uranium Miners (Nuclear)", "KWEB": "China Internet"
 }
 
-# --- WATCHLISTS ---
+# --- WATCHLIST GROUPS ---
 MAJOR_THEMES = "SPY, QQQ, DIA, IWF, IWD, MAGS, IWM, GLD, SLV, COPX, XLE, IBIT, IGV, XLP, XLRE, ARKK, TLT, UUP, XME, SMH, SOXX, FTXL"
 INDUSTRY_THEMES = "SMH, GEV, COPX, URNM, BOAT, BDRY, POWR, PAVE, REMX, OZEM, JEDI, DRNZ, HACK, IGV, BOTZ, QTUM, IBIT, WGMI, GDX, SIL, XME, SLX, TAN, XBI, IDNA, IYT, JETS, XHB, KRE, ITA, KWEB, XLE, OIH, IHI"
 INTL_COUNTRIES = "THD, EWZ, EWY, EWT, EWG, EWJ, EWC, EWW, EPU, ECH, ARGT, EZA, EIDO, EWM, EWP, EWL, EWQ, EWU, EWH, INDA, EWA"
@@ -40,24 +39,24 @@ HARD_ASSETS = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, URNM,
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("🎯 Watchlist")
-    group_choice = st.radio("Choose Group:", ["Major Themes", "Industry Themes", "International Countries", "Hard Assets", "Sita Hub Manager"])
+    group_choice = st.radio("Choose Group:", ["Major Themes", "Industry Themes", "International Countries", "Hard Assets"])
     
-    if group_choice == "Sita Hub Manager":
-        hub_data = {} # Simplified for space; uses your load_from_hub logic
-        tickers_input = st.text_area("Edit Tickers:", value="AAPL, MSFT", height=150)
-    else:
-        tickers_input = {
-            "Major Themes": MAJOR_THEMES, "Industry Themes": INDUSTRY_THEMES,
-            "International Countries": INTL_COUNTRIES, "Hard Assets": HARD_ASSETS
-        }.get(group_choice, "")
-        tickers_input = st.text_area("Ticker Heap:", value=tickers_input, height=150)
+    tickers_input = {
+        "Major Themes": MAJOR_THEMES, "Industry Themes": INDUSTRY_THEMES,
+        "International Countries": INTL_COUNTRIES, "Hard Assets": HARD_ASSETS
+    }.get(group_choice, "")
+    tickers_input = st.text_area("Ticker Heap:", value=tickers_input, height=150)
 
     st.markdown("---")
     st.header("⚙️ Engine Settings")
     scanner_speed = st.select_slider("Scanner Speed:", options=["Fast (Swing)", "Agile (Standard)", "Structural (Macro)"], value="Agile (Standard)")
     main_timeframe = st.radio("Display Timeframe:", ["Weekly", "Daily"], index=0)
 
-    d_look, w_look = (5, 5) if scanner_speed == "Fast (Swing)" else (6, 6) if scanner_speed == "Agile (Standard)" else (14, 14)
+    # Adaptive Lookbacks
+    if scanner_speed == "Fast (Swing)": d_look, w_look = 5, 5
+    elif scanner_speed == "Agile (Standard)": d_look, w_look = 6, 6
+    else: d_look, w_look = 14, 14
+        
     active_lookback = d_look if main_timeframe == "Daily" else w_look
     auto_bench = "ONE" if group_choice == "Hard Assets" else "SPY"
     benchmark = st.text_input("Benchmark:", value=auto_bench)
@@ -96,7 +95,6 @@ with tab1:
         fig = go.Figure()
         fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
         fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
-        fig.add_vrect(x0=POWER_WALK_LEVEL, x1=CHART_RANGE[1], fillcolor="#2ECC71", opacity=0.1, layer="below")
         
         for i, t in enumerate(to_plot):
             res = get_rrg_metrics(data_all, t, benchmark.upper(), active_lookback)
@@ -105,7 +103,7 @@ with tab1:
                 color = px.colors.qualitative.Alphabet[i % 26]
                 fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines+markers', marker=dict(size=6, color=color, opacity=0.5), line=dict(color=color, width=2, shape='spline'), legendgroup=t, showlegend=False))
                 fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), text=[f"<b>{t}</b>"], textposition="top center", legendgroup=t, name=t))
-        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE), yaxis=dict(range=CHART_RANGE))
+        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
@@ -123,9 +121,9 @@ with tab2:
                 rel_s = (px.loc[common] / bx.loc[common])
                 rs_mom = (rel_s.iloc[-1] / rel_s.iloc[-5]) - 1
                 
-                # --- STABILIZED SIGMOID CALCULATION ---
+                # --- STABILIZED SIGMOID (Fixes Overflow) ---
                 z = (trend_dist * 350) + (rs_mom * 450)
-                z_capped = max(min(z, 50), -50) # Prevents exp() overflow
+                z_capped = np.clip(z, -50, 50) 
                 score = int(100 / (1 + np.exp(-z_capped)))
                 
                 flow_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Flow Score": score, "Trend %": round(trend_dist*100, 1), "Status": "🔥 ACCUMULATION" if score > 80 else "⚖️ HOLD" if score > 40 else "⚠️ DISTRIBUTION"})
