@@ -17,7 +17,7 @@ RRG_CENTER, EPSILON = 100, 1e-8
 Z_LIMITS = (80, 120)  
 CHART_RANGE = [96.5, 103.5] 
 
-# --- MASTER TICKER DICTIONARY ---
+# --- TICKER DICTIONARY ---
 TICKER_NAMES = {
     "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
     "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
@@ -40,22 +40,18 @@ HARD_ASSETS = "GC=F, SI=F, HG=F, CL=F, BZ=F, NG=F, PL=F, PA=F, TIO=F, ALB, URNM,
 with st.sidebar:
     st.header("🎯 Watchlist")
     group_choice = st.radio("Choose Group:", ["Major Themes", "Industry Themes", "International Countries", "Hard Assets"])
-    
     tickers_input = {
         "Major Themes": MAJOR_THEMES, "Industry Themes": INDUSTRY_THEMES,
         "International Countries": INTL_COUNTRIES, "Hard Assets": HARD_ASSETS
     }.get(group_choice, "")
     tickers_input = st.text_area("Ticker Heap:", value=tickers_input, height=150)
-
     st.markdown("---")
     st.header("⚙️ Engine Settings")
     scanner_speed = st.select_slider("Scanner Speed:", options=["Fast (Swing)", "Agile (Standard)", "Structural (Macro)"], value="Agile (Standard)")
     main_timeframe = st.radio("Display Timeframe:", ["Weekly", "Daily"], index=0)
-
     if scanner_speed == "Fast (Swing)": d_look, w_look = 5, 5
     elif scanner_speed == "Agile (Standard)": d_look, w_look = 6, 6
     else: d_look, w_look = 14, 14
-        
     active_lookback = d_look if main_timeframe == "Daily" else w_look
     auto_bench = "ONE" if group_choice == "Hard Assets" else "SPY"
     benchmark = st.text_input("Benchmark:", value=auto_bench)
@@ -105,6 +101,17 @@ with tab1:
         fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
         st.plotly_chart(fig, use_container_width=True)
 
+        # --- RESTORED MINI-GRID UNDER RRG ---
+        st.subheader("📋 Snapshot Grid")
+        snap_data = []
+        for t in tickers_list:
+            res = get_rrg_metrics(data_all, t, benchmark.upper(), active_lookback)
+            if res is not None:
+                x, y = res['x'].iloc[-1], res['y'].iloc[-1]
+                stg = "LEADING" if x>=100 and y>=100 else "IMPROVING" if x<100 and y>=100 else "LAGGING" if x<100 and y<100 else "WEAKENING"
+                snap_data.append({"Ticker": t, "Stage": stg, "Ratio": round(x, 2), "Momentum": round(y, 2)})
+        st.dataframe(pd.DataFrame(snap_data), use_container_width=True)
+
 with tab2:
     st.subheader("🏦 Capital Flow Scorecard")
     if data_all is not None:
@@ -114,19 +121,20 @@ with tab2:
                 px = data_all[t].dropna()
                 bx = pd.Series(1.0, index=px.index) if benchmark.upper() == "ONE" else data_all[benchmark.upper()].dropna()
                 common = px.index.intersection(bx.index)
-                
                 if len(common) > 20:
                     sma20 = px.loc[common].rolling(20).mean()
                     trend_dist = (px.loc[common].iloc[-1] / sma20.iloc[-1]) - 1
                     rel_s = (px.loc[common] / bx.loc[common])
                     rs_mom = (rel_s.iloc[-1] / rel_s.iloc[-5]) - 1
                     
-                    # --- ANTI-CRASH SANITIZER ---
+                    # Anti-Crash + Stretching the Score
                     trend_dist = 0 if np.isnan(trend_dist) else trend_dist
                     rs_mom = 0 if np.isnan(rs_mom) else rs_mom
                     
+                    # --- NEW NUANCED STRETCH MATH ---
                     raw_blend = (trend_dist * 1.5) + (rs_mom * 2.5)
-                    score = int(np.clip((raw_blend + 0.10) / 0.20, 0, 1) * 100)
+                    # Increased denominator from 0.20 to 0.40 to stop the 100/0 clumping
+                    score = int(np.clip((raw_blend + 0.20) / 0.40, 0, 1) * 100)
                     
                     flow_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Flow Score": score, "Trend %": round(trend_dist*100, 1), "RS Δ": round(rs_mom*100, 1), "Status": "🔥 ACCUMULATION" if score > 80 else "⚖️ HOLD" if score > 40 else "⚠️ DISTRIBUTION"})
         
