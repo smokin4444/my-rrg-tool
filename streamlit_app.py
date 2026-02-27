@@ -17,6 +17,7 @@ RRG_CENTER = 100
 EPSILON = 1e-8
 Z_LIMITS = (80, 120)  
 CHART_RANGE = [96.5, 103.5] 
+POWER_WALK_LEVEL = 101.5
 
 # --- SITA HUB SYNC ---
 def load_from_hub():
@@ -30,10 +31,21 @@ def load_from_hub():
 
 # --- MASTER TICKER DICTIONARY ---
 TICKER_NAMES = {
-    "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "SMH": "Semiconductors", "GEV": "GE Vernova (Power)",
-    "COPX": "Copper Miners", "URNM": "Uranium Miners", "BOAT": "Global Shipping", "BDRY": "Dry Bulk",
-    "POWR": "US Grid Infra", "PAVE": "US Infrastructure", "REMX": "Rare Earths", "OZEM": "Weight Loss",
-    "JEDI": "Modern Warfare", "DRNZ": "Drones", "XLE": "Energy", "OIH": "Oil Services", "KWEB": "China Internet"
+    "SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWF": "Growth Stocks", 
+    "IWD": "Value Stocks", "MAGS": "Magnificent 7", "IWM": "Small Caps", 
+    "GLD": "Gold ETF", "SLV": "Silver ETF", "COPX": "Global Copper Miners", "XLE": "Energy",
+    "XLK": "Technology", "XLY": "Consumer Durables", "XLC": "Communications", 
+    "XLF": "Finance", "XLI": "Producer Manufacturing", 
+    "XLV": "Health Services", "XLP": "Cons Staples", "XLU": "Utilities", 
+    "XLB": "Materials (Broad)", "IYT": "Transportation", "SMH": "Semiconductors (NVDA)", 
+    "SOXX": "Memory/Broad Semi", "FTXL": "Memory Super-Cycle (MU/WDC)", "IGV": "Software", 
+    "XHB": "Home Construction", "IBIT": "Bitcoin Trust", "XME": "S&P Metals & Mining",
+    "BDRY": "Dry Bulk Shipping", "BOAT": "Global Shipping ETF", "MOO": "Agribusiness",
+    "JEDI": "Modern Warfare & Drones", "DRNZ": "Drone Tech (REX)", "ITA": "Aerospace & Defense",
+    "POWR": "U.S. Power/Grid Infra", "PAVE": "U.S. Infrastructure Dev", 
+    "REMX": "Rare Earth/Strategic Metals", "URNM": "Uranium Miners (Nuclear)", "ALB": "Lithium",
+    "OZEM": "GLP-1 & Weight Loss", "IHI": "Medical Devices", "XBI": "Biotechnology",
+    "GEV": "GE Vernova (Grid/Power)", "KWEB": "China Internet"
 }
 
 # --- WATCHLISTS ---
@@ -55,81 +67,87 @@ with st.sidebar:
     st.markdown("---")
     st.header("⚙️ Engine Settings")
     scanner_speed = st.select_slider("Scanner Speed:", options=["Fast (Swing)", "Agile (Standard)", "Structural (Macro)"], value="Agile (Standard)")
-    main_timeframe = st.radio("Timeframe:", ["Weekly", "Daily"], index=0)
-    
-    d_look, w_look = (5, 5) if scanner_speed == "Fast (Swing)" else (6, 6) if scanner_speed == "Agile (Standard)" else (14, 14)
-    active_lookback = d_look if main_timeframe == "Daily" else w_look
-    benchmark = st.text_input("Benchmark:", value="SPY")
+    main_timeframe = st.radio("Display Chart Timeframe:", ["Weekly", "Daily"], index=0)
 
-# --- DATA ENGINE ---
+    if scanner_speed == "Fast (Swing)": d_look, w_look = 5, 5
+    elif scanner_speed == "Agile (Standard)": d_look, w_look = 6, 6
+    else: d_look, w_look = 14, 14
+        
+    active_lookback = d_look if main_timeframe == "Daily" else w_look
+    benchmark = st.text_input("Active Benchmark:", value="SPY")
+    tail_len = st.slider("Tail Length:", 2, 30, active_lookback)
+    
+    if st.button("♻️ Reset Engine"):
+        st.cache_data.clear()
+        st.rerun()
+
+# --- ANALYTICS ENGINE ---
 @st.cache_data(ttl=600)
 def download_data(tickers, interval):
-    data = yf.download(tickers, period="1y", interval=interval, progress=False)
+    data = yf.download(tickers, period="2y", interval=interval, progress=False)
     return data['Close'] if not data.empty else None
 
-# --- FLOW SCORE CALCULATION ---
-def calculate_flow_score(df_raw, ticker, bench_ticker):
+def get_rrg_metrics(df_raw, ticker, bench_t, lookback_val):
+    if df_raw is None or ticker not in df_raw.columns: return None
     try:
         px = df_raw[ticker].dropna()
-        bx = df_raw[bench_ticker].dropna()
+        bx = df_raw[bench_t].dropna()
         common = px.index.intersection(bx.index)
-        
-        # 1. Trend Score (Distance from SMA)
-        sma20 = px.loc[common].rolling(20).mean()
-        trend_val = (px.loc[common].iloc[-1] / sma20.iloc[-1]) - 1
-        
-        # 2. RS Score (Ticker vs Bench)
-        rel_strength = (px.loc[common] / bx.loc[common])
-        rs_mom = (rel_strength.iloc[-1] / rel_strength.iloc[-5]) - 1
-        
-        # 3. Composite Calculation (Scaled 0-100)
-        # Using a sigmoid-style normalization to keep it 0-100
-        raw_score = (trend_val * 400) + (rs_mom * 500)
-        final_score = int(100 / (1 + np.exp(-(raw_score))))
-        
-        return final_score, round(trend_val * 100, 2), round(rs_mom * 100, 2)
-    except: return 50, 0, 0
+        if len(common) < lookback_val + 5: return None
+        rel = ((px.loc[common] / bx.loc[common]) * 100).ewm(span=3).mean() 
+        def standardize(s): return RRG_CENTER + ((s - s.rolling(lookback_val).mean()) / s.rolling(lookback_val).std().replace(0, EPSILON))
+        ratio, mom = standardize(rel).clip(*Z_LIMITS), standardize(rel.diff(1)).clip(*Z_LIMITS)
+        df_res = pd.DataFrame({'x': ratio, 'y': mom, 'date': ratio.index}).dropna()
+        return df_res
+    except: return None
 
-# --- MAIN UI TABS ---
+# --- UI TABS ---
 tab1, tab2 = st.tabs(["🌀 Relative Rotation (RRG)", "🏦 Capital Flow Leaders"])
 
-# Shared download
 tickers_list = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
 full_ticker_set = list(set(tickers_list + [benchmark.upper()]))
 interval = "1d" if main_timeframe == "Daily" else "1wk"
-df_main = download_data(full_ticker_set, interval)
+data_all = download_data(full_ticker_set, interval)
 
 with tab1:
-    st.subheader(f"Relative Rotation: {scanner_speed}")
-    # (Existing RRG Logic goes here - plotting markers and tails)
-    st.info("The RRG helps you visualize the 'rotation' of these sectors.")
-    
+    if data_all is not None:
+        col_t1, col_t2 = st.columns([1, 4])
+        with col_t1: show_all = st.checkbox("Show All Tickers", value=True)
+        to_plot = st.multiselect("Active Plotters:", options=tickers_list, default=tickers_list if show_all else [])
+        
+        fig = go.Figure()
+        fig.add_shape(type="line", x0=100, y0=0, x1=100, y1=200, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
+        fig.add_shape(type="line", x0=0, y0=100, x1=200, y1=100, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
+        fig.add_vrect(x0=POWER_WALK_LEVEL, x1=CHART_RANGE[1], fillcolor="#2ECC71", opacity=0.1, layer="below")
+        
+        for i, t in enumerate(to_plot):
+            res = get_rrg_metrics(data_all, t, benchmark.upper(), active_lookback)
+            if res is not None:
+                df_p = res.iloc[-min(tail_len, len(res)):]
+                color = px.colors.qualitative.Alphabet[i % 26]
+                fig.add_trace(go.Scatter(x=df_p['x'], y=df_p['y'], mode='lines+markers', marker=dict(size=6, color=color, opacity=0.5), line=dict(color=color, width=2, shape='spline'), legendgroup=t, showlegend=False))
+                fig.add_trace(go.Scatter(x=[df_p['x'].iloc[-1]], y=[df_p['y'].iloc[-1]], mode='markers+text', marker=dict(symbol='diamond', size=14, color=color, line=dict(width=1.5, color='white')), text=[f"<b>{t}</b>"], textposition="top center", legendgroup=t, name=t))
+        
+        fig.update_layout(template="plotly_white", height=800, xaxis=dict(range=CHART_RANGE, title="RS-Ratio"), yaxis=dict(range=CHART_RANGE, title="RS-Momentum"))
+        st.plotly_chart(fig, use_container_width=True)
+
 with tab2:
-    st.subheader("Institutional Money Flow Scorecard")
-    st.markdown("This score (0-100) measures where big money is currently concentrating. Scores above 80 indicate **Heavy Accumulation**.")
-    
-    if df_main is not None:
+    st.subheader("🏦 Capital Flow Scorecard (Weekly)")
+    if data_all is not None:
         flow_data = []
         for t in tickers_list:
-            if t in df_main.columns:
-                score, trend, rs = calculate_flow_score(df_main, t, benchmark.upper())
-                flow_data.append({
-                    "Ticker": t,
-                    "Name": TICKER_NAMES.get(t, t),
-                    "Flow Score": score,
-                    "Trend Strength %": trend,
-                    "Rel. Strength Δ": rs,
-                    "Status": "🔥 ACCUMULATION" if score > 80 else "⚖️ HOLD" if score > 40 else "⚠️ DISTRIBUTION"
-                })
+            if t in data_all.columns:
+                px = data_all[t].dropna()
+                bx = data_all[benchmark.upper()].dropna()
+                common = px.index.intersection(bx.index)
+                
+                # Formula: (Trend Distance + RS Momentum) normalized to 0-100
+                sma20 = px.loc[common].rolling(20).mean()
+                trend_dist = (px.loc[common].iloc[-1] / sma20.iloc[-1]) - 1
+                rel_s = (px.loc[common] / bx.loc[common])
+                rs_mom = (rel_s.iloc[-1] / rel_s.iloc[-5]) - 1
+                
+                score = int(100 / (1 + np.exp(-((trend_dist * 350) + (rs_mom * 450)))))
+                flow_data.append({"Ticker": t, "Name": TICKER_NAMES.get(t, t), "Flow Score": score, "Trend %": round(trend_dist*100, 2), "Status": "🔥 ACCUMULATION" if score > 80 else "⚖️ HOLD" if score > 40 else "⚠️ DISTRIBUTION"})
         
-        flow_df = pd.DataFrame(flow_data).sort_values("Flow Score", ascending=False)
-        
-        # Displaying with color coding
-        def color_score(val):
-            color = 'green' if val > 80 else 'red' if val < 40 else 'white'
-            return f'color: {color}'
-
-        st.dataframe(flow_df.style.applymap(color_score, subset=['Flow Score']), use_container_width=True)
-        
-        st.markdown("---")
-        st.caption("Flow Score is a composite of Trend Distance and Relative Strength Momentum.")
+        st.dataframe(pd.DataFrame(flow_data).sort_values("Flow Score", ascending=False), use_container_width=True)
